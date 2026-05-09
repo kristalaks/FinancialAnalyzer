@@ -35,13 +35,13 @@ namespace FinancialAnalyzer.Forms
             InitializeComponent();
             _existingDeposit = existingDeposit;
 
+            SetupForm();  // Сначала создаём контролы
+
             if (existingDeposit != null)
             {
                 this.Text = "Редактировать вклад";
-                LoadDepositData(existingDeposit);
+                LoadDepositData(existingDeposit);  // Потом заполняем данными
             }
-
-            SetupForm();
         }
 
         private void SetupForm()
@@ -221,9 +221,14 @@ namespace FinancialAnalyzer.Forms
 
         private void LoadDepositData(DepositModel deposit)
         {
-            _txtName = new TextBox { Text = deposit.Name };
-            _txtAmount = new TextBox { Text = deposit.InitialAmount.ToString("F0") };
-            _txtRate = new TextBox { Text = deposit.InterestRate.ToString("F1") };
+            _txtName.Text = deposit.Name;
+            _txtName.ForeColor = Color.FromArgb(44, 62, 80);  // чёрный текст, не серый
+
+            _txtAmount.Text = deposit.InitialAmount.ToString("F0");
+            _txtAmount.ForeColor = Color.FromArgb(44, 62, 80);
+
+            _txtRate.Text = deposit.InterestRate.ToString("F1");
+            _txtRate.ForeColor = Color.FromArgb(44, 62, 80);
 
             if (deposit.RateType == 0)
                 _rbSimple.Checked = true;

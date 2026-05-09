@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace FinancialAnalyzer.Models
 {
@@ -7,6 +8,7 @@ namespace FinancialAnalyzer.Models
     /// </summary>
     public class ExpenseModel
     {
+        
         public enum ExpenseCategoryEnum
         {
             Food = 0,
@@ -29,6 +31,7 @@ namespace FinancialAnalyzer.Models
             Yearly = 2
         }
 
+        [Key]
         public int Id { get; set; }
         public ExpenseCategoryEnum Category { get; set; }
         public string CustomCategoryName { get; set; }
@@ -37,6 +40,8 @@ namespace FinancialAnalyzer.Models
         public ExpensePeriodEnum Period { get; set; }
         public DateTime Date { get; set; }
         public string Note { get; set; }
+        public int? SourceReserveId { get; set; }
+        public string SourceReserveName { get; set; }
 
         /// <summary>Месячный эквивалент расхода</summary>
         public decimal MonthlyAmount

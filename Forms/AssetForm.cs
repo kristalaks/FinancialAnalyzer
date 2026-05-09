@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using FinancialAnalyzer.Models;
+using FinancialAnalyzer.Services;
 
 namespace FinancialAnalyzer.Forms
 {
@@ -18,10 +19,13 @@ namespace FinancialAnalyzer.Forms
         private TextBox _txtPrice;
         private DateTimePicker _dtpPurchase;
         private Label _lblError;
-        private Label _lblCalculation;
+        private Label _lblCalc;
+        private Button _btnGetPrice;
+        private Label _lblCurrentPrice;
 
         private AssetModel.AssetTypeEnum _assetType;
         private AssetModel _existingAsset;
+        private decimal? _apiPrice = null;
 
         public AssetModel Result { get; private set; }
 
@@ -29,7 +33,7 @@ namespace FinancialAnalyzer.Forms
         {
             InitializeComponent();
             _assetType = assetType;
-            this.Text = $"Добавить актив ({GetTypeName()})";
+            this.Text = $"Добавить ({GetTypeName()})";
             SetupForm();
         }
 
@@ -38,7 +42,7 @@ namespace FinancialAnalyzer.Forms
             InitializeComponent();
             _existingAsset = existingAsset;
             _assetType = existingAsset.Type;
-            this.Text = $"Редактировать актив ({GetTypeName()})";
+            this.Text = $"Редактировать ({GetTypeName()})";
             SetupForm();
             LoadExistingData();
         }
@@ -54,166 +58,314 @@ namespace FinancialAnalyzer.Forms
             }
         }
 
+        private string GetDefaultTicker()
+        {
+            switch (_assetType)
+            {
+                case AssetModel.AssetTypeEnum.Stock: return "SBER";
+                case AssetModel.AssetTypeEnum.Currency: return "USD";
+                case AssetModel.AssetTypeEnum.Metal: return "XAU";
+                default: return "";
+            }
+        }
+
         private void LoadExistingData()
         {
             if (_existingAsset == null) return;
             _txtTicker.Text = _existingAsset.Ticker;
+            _txtTicker.ForeColor = _textColor;
             _txtCompany.Text = _existingAsset.CompanyName;
+            _txtCompany.ForeColor = _textColor;
             _cmbExchange.Text = _existingAsset.Exchange;
             _txtQuantity.Text = _existingAsset.Quantity.ToString("F0");
+            _txtQuantity.ForeColor = _textColor;
             _txtPrice.Text = _existingAsset.PurchasePrice.ToString("F2");
+            _txtPrice.ForeColor = _textColor;
             _dtpPurchase.Value = _existingAsset.PurchaseDate;
+            UpdateCalculation();
         }
 
         private void SetupForm()
         {
             this.SuspendLayout();
+            int left = 30, width = 420, y = 25;
 
-            int leftMargin = 30;
-            int fieldWidth = 440;
-            int currentY = 25;
-
+            // Заголовок
             var lblTitle = new Label
             {
                 Text = _existingAsset != null ? $"Редактирование: {_existingAsset.Ticker}" : $"Новый актив: {GetTypeName()}",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 ForeColor = _primaryColor,
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(fieldWidth, 35)
+                Location = new Point(left, y),
+                Size = new Size(width, 35)
             };
-            currentY += 55;
+            y += 55;
 
             // Тикер
-            AddLabel("Тикер (краткий код):", leftMargin, currentY);
-            currentY += 22;
-            _txtTicker = AddTextBox(leftMargin, currentY, fieldWidth, "SBER, AAPL, USD/RUB");
-            currentY += 45;
+            AddLabel("Тикер:", left, y); y += 22;
+            _txtTicker = AddTextBox(left, y, width - 110, GetDefaultTicker());
+            _txtTicker.ForeColor = _textColor;
+            _txtTicker.TextChanged += (s, e) => { _apiPrice = null; _lblCurrentPrice.Text = "Текущая цена: нажмите «Узнать цену»"; _lblCurrentPrice.ForeColor = Color.FromArgb(149, 165, 166); };
 
-            // Компания
-            AddLabel("Название компании:", leftMargin, currentY);
-            currentY += 22;
-            _txtCompany = AddTextBox(leftMargin, currentY, fieldWidth, "Сбербанк, Apple Inc.");
-            currentY += 45;
+            _btnGetPrice = new Button
+            {
+                Text = "💰 Узнать цену",
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Location = new Point(left + width - 100, y),
+                Size = new Size(100, 25),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(46, 204, 113),
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            _btnGetPrice.FlatAppearance.BorderSize = 0;
+            _btnGetPrice.Click += BtnGetPrice_Click;
+            this.Controls.Add(_btnGetPrice);
+            y += 45;
+
+            // Название компании
+            AddLabel("Название:", left, y); y += 22;
+            _txtCompany = AddTextBox(left, y, width, "");
+            y += 45;
 
             // Биржа
-            AddLabel("Биржа:", leftMargin, currentY);
-            currentY += 22;
+            AddLabel("Биржа:", left, y); y += 22;
             _cmbExchange = new ComboBox
             {
                 Font = new Font("Segoe UI", 10),
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(fieldWidth, 25),
+                Location = new Point(left, y),
+                Size = new Size(width, 25),
                 DropDownStyle = ComboBoxStyle.DropDownList
             };
-            _cmbExchange.Items.AddRange(new[] { "MOEX", "NASDAQ", "NYSE", "Forex", "Другая" });
-            _cmbExchange.SelectedIndex = 0;
+            _cmbExchange.Items.AddRange(new[] { "MOEX", "NASDAQ", "NYSE", "Forex", "Metals", "Другое" });
             this.Controls.Add(_cmbExchange);
-            currentY += 45;
+            y += 45;
 
             // Количество
-            AddLabel("Количество (шт./ед.):", leftMargin, currentY);
-            currentY += 22;
-            _txtQuantity = AddTextBox(leftMargin, currentY, fieldWidth, "100");
-            currentY += 45;
+            AddLabel("Количество (шт./ед.):", left, y); y += 22;
+            _txtQuantity = AddTextBox(left, y, width, "1");
+            _txtQuantity.TextChanged += (s, e) => UpdateCalculation();
+            y += 45;
 
             // Цена покупки
-            AddLabel("Цена покупки за единицу (₽):", leftMargin, currentY);
-            currentY += 22;
-            _txtPrice = AddTextBox(leftMargin, currentY, fieldWidth, "254.00");
-            currentY += 45;
+            AddLabel("Цена покупки за единицу (₽):", left, y); y += 22;
+            _txtPrice = AddTextBox(left, y, width, "0");
+            _txtPrice.TextChanged += (s, e) => UpdateCalculation();
+            y += 45;
+
+            // Текущая цена
+            _lblCurrentPrice = new Label
+            {
+                Text = "Текущая цена: нажмите «Узнать цену» для получения из API ЦБ",
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.FromArgb(149, 165, 166),
+                Location = new Point(left, y),
+                Size = new Size(width, 30)
+            };
+            this.Controls.Add(_lblCurrentPrice);
+            y += 40;
 
             // Дата покупки
-            AddLabel("Дата покупки:", leftMargin, currentY);
-            currentY += 22;
+            AddLabel("Дата покупки:", left, y); y += 22;
             _dtpPurchase = new DateTimePicker
             {
                 Format = DateTimePickerFormat.Short,
                 Font = new Font("Segoe UI", 10),
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(fieldWidth, 25),
+                Location = new Point(left, y),
+                Size = new Size(width, 25),
                 Value = DateTime.Now
             };
             this.Controls.Add(_dtpPurchase);
-            currentY += 45;
+            y += 45;
 
             // Предварительный расчёт
             var calcPanel = new Panel
             {
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(fieldWidth, 40),
+                Location = new Point(left, y),
+                Size = new Size(width, 35),
                 BackColor = Color.FromArgb(248, 249, 250)
             };
-            _lblCalculation = new Label
+            _lblCalc = new Label
             {
-                Text = "Заполните поля для расчёта",
+                Text = "Введите количество и цену покупки",
                 Font = new Font("Segoe UI", 9),
                 ForeColor = _textColor,
-                Location = new Point(10, 10),
-                Size = new Size(fieldWidth - 20, 20)
+                Location = new Point(10, 8),
+                Size = new Size(width - 20, 20)
             };
-            calcPanel.Controls.Add(_lblCalculation);
+            calcPanel.Controls.Add(_lblCalc);
             this.Controls.Add(calcPanel);
-            currentY += 55;
+            y += 50;
 
             // Ошибка
             _lblError = new Label
             {
                 Font = new Font("Segoe UI", 9),
                 ForeColor = Color.FromArgb(231, 76, 60),
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(fieldWidth, 20),
+                Location = new Point(left, y),
+                Size = new Size(width, 20),
                 Text = ""
             };
             this.Controls.Add(_lblError);
-            currentY += 30;
+            y += 30;
 
             // Кнопки
-            var btnSave = new Button
-            {
-                Text = "Сохранить",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(210, 40),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _accentColor,
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand
-            };
-            btnSave.FlatAppearance.BorderSize = 0;
+            var btnSave = CreateButton("Сохранить", left, y, 200, _accentColor, Color.White);
             btnSave.Click += BtnSave_Click;
-
-            var btnCancel = new Button
-            {
-                Text = "Отмена",
-                Font = new Font("Segoe UI", 12),
-                Location = new Point(leftMargin + 230, currentY),
-                Size = new Size(210, 40),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(236, 240, 241),
-                ForeColor = _textColor,
-                Cursor = Cursors.Hand
-            };
-            btnCancel.FlatAppearance.BorderSize = 0;
+            var btnCancel = CreateButton("Отмена", left + 220, y, 200, Color.FromArgb(236, 240, 241), _textColor);
             btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
 
             this.Controls.AddRange(new Control[] { btnSave, btnCancel });
 
+            // Предустановка биржи
+            switch (_assetType)
+            {
+                case AssetModel.AssetTypeEnum.Stock: _cmbExchange.SelectedIndex = 0; break;
+                case AssetModel.AssetTypeEnum.Currency: _cmbExchange.SelectedIndex = 3; break;
+                case AssetModel.AssetTypeEnum.Metal: _cmbExchange.SelectedIndex = 4; break;
+            }
+
             this.ResumeLayout(false);
+        }
+
+        private void BtnGetPrice_Click(object sender, EventArgs e)
+        {
+            string ticker = _txtTicker.Text.Trim().ToUpper();
+            if (string.IsNullOrEmpty(ticker))
+            {
+                _lblError.Text = "Введите тикер";
+                return;
+            }
+            _lblError.Text = "";
+
+            Cursor = Cursors.WaitCursor;
+            _btnGetPrice.Enabled = false;
+
+            try
+            {
+                _apiPrice = null;
+
+                if (_assetType == AssetModel.AssetTypeEnum.Currency)
+                {
+                    _apiPrice = MarketDataService.GetCurrencyRate(ticker);
+                    if (_apiPrice.HasValue)
+                    {
+                        _txtCompany.Text = GetCurrencyName(ticker);
+                        _txtCompany.ForeColor = _textColor;
+                        _cmbExchange.SelectedIndex = 3;
+                    }
+                }
+                else if (_assetType == AssetModel.AssetTypeEnum.Stock)
+                {
+                    _apiPrice = MarketDataService.GetStockPrice(ticker);
+                    if (_apiPrice.HasValue)
+                    {
+                        if (string.IsNullOrWhiteSpace(_txtCompany.Text) || _txtCompany.ForeColor == Color.FromArgb(189, 195, 199))
+                        {
+                            _txtCompany.Text = ticker;
+                            _txtCompany.ForeColor = _textColor;
+                        }
+                        _cmbExchange.SelectedIndex = 0;
+                    }
+                }
+                else if (_assetType == AssetModel.AssetTypeEnum.Metal)
+                {
+                    _apiPrice = MarketDataService.GetMetalPrice(ticker);
+                    if (_apiPrice.HasValue)
+                    {
+                        _txtCompany.Text = GetMetalName(ticker);
+                        _txtCompany.ForeColor = _textColor;
+                        _cmbExchange.SelectedIndex = 4;
+                    }
+                }
+
+                if (_apiPrice.HasValue && _apiPrice.Value > 0)
+                {
+                    _lblCurrentPrice.Text = $"Текущая цена (ЦБ РФ): {_apiPrice.Value:F2} ₽";
+                    _lblCurrentPrice.ForeColor = Color.FromArgb(46, 204, 113);
+
+                    if (_txtPrice.Text == "0" || string.IsNullOrWhiteSpace(_txtPrice.Text))
+                    {
+                        _txtPrice.Text = _apiPrice.Value.ToString("F2");
+                        _txtPrice.ForeColor = _textColor;
+                    }
+                }
+                else
+                {
+                    _lblCurrentPrice.Text = $"Текущая цена: не найдена для '{ticker}'";
+                    _lblCurrentPrice.ForeColor = Color.FromArgb(231, 76, 60);
+                }
+                UpdateCalculation();
+            }
+            catch
+            {
+                _lblCurrentPrice.Text = "Ошибка при запросе к API ЦБ";
+                _lblCurrentPrice.ForeColor = Color.FromArgb(231, 76, 60);
+            }
+
+            _btnGetPrice.Enabled = true;
+            Cursor = Cursors.Default;
+        }
+
+        private string GetCurrencyName(string code)
+        {
+            switch (code.ToUpper())
+            {
+                case "USD": return "Доллар США";
+                case "EUR": return "Евро";
+                case "CNY": return "Китайский юань";
+                case "GBP": return "Британский фунт";
+                case "JPY": return "Японская йена";
+                case "CHF": return "Швейцарский франк";
+                default: return code;
+            }
+        }
+
+        private string GetMetalName(string ticker)
+        {
+            switch (ticker.ToUpper())
+            {
+                case "XAU": return "Золото (грамм)";
+                case "XAG": return "Серебро (грамм)";
+                case "XPT": return "Платина (грамм)";
+                case "XPD": return "Палладий (грамм)";
+                default: return ticker;
+            }
+        }
+
+        private void UpdateCalculation()
+        {
+            if (decimal.TryParse(_txtPrice.Text, out decimal price) &&
+                decimal.TryParse(_txtQuantity.Text, out decimal qty))
+            {
+                decimal invested = price * qty;
+                string text = $"Вложено: {invested:N2} ₽";
+
+                if (_apiPrice.HasValue && _apiPrice.Value > 0)
+                {
+                    decimal current = _apiPrice.Value * qty;
+                    decimal profit = current - invested;
+                    decimal percent = invested > 0 ? profit / invested * 100 : 0;
+                    string sign = profit >= 0 ? "+" : "";
+                    text += $" | Сейчас: {current:N2} ₽ | {sign}{percent:F1}%";
+                }
+
+                _lblCalc.Text = text;
+            }
         }
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
-            // Валидация
-            if (string.IsNullOrWhiteSpace(_txtTicker.Text) || _txtTicker.Text.Contains("SBER"))
+            string ticker = _txtTicker.Text.Trim().ToUpper();
+            string company = _txtCompany.Text.Trim();
+
+            if (string.IsNullOrWhiteSpace(ticker))
             {
-                ShowError("Введите тикер актива");
+                ShowError("Введите тикер");
                 return;
             }
-            if (string.IsNullOrWhiteSpace(_txtCompany.Text) || _txtCompany.Text.Contains("Сбербанк"))
-            {
-                ShowError("Введите название компании");
-                return;
-            }
+            if (string.IsNullOrWhiteSpace(company))
+                company = ticker;
             if (!decimal.TryParse(_txtQuantity.Text, out decimal qty) || qty <= 0)
             {
                 ShowError("Введите корректное количество");
@@ -234,13 +386,13 @@ namespace FinancialAnalyzer.Forms
             {
                 Id = _existingAsset?.Id ?? 0,
                 Type = _assetType,
-                Ticker = _txtTicker.Text.Trim().ToUpper(),
-                CompanyName = _txtCompany.Text.Trim(),
+                Ticker = ticker,
+                CompanyName = company,
                 Exchange = _cmbExchange.SelectedItem.ToString(),
                 Quantity = qty,
                 PurchasePrice = price,
                 PurchaseDate = _dtpPurchase.Value,
-                CurrentPrice = price  // для нового актива = цене покупки
+                CurrentPrice = _apiPrice ?? price
             };
 
             _lblError.Text = "";
@@ -261,21 +413,21 @@ namespace FinancialAnalyzer.Forms
                 Font = new Font("Segoe UI", 10),
                 ForeColor = _textColor,
                 Location = new Point(x, y),
-                Size = new Size(440, 20)
+                Size = new Size(420, 20)
             };
             this.Controls.Add(lbl);
         }
 
-        private TextBox AddTextBox(int x, int y, int width, string placeholder)
+        private TextBox AddTextBox(int x, int y, int w, string placeholder)
         {
             var tb = new TextBox
             {
                 Font = new Font("Segoe UI", 10),
                 Location = new Point(x, y),
-                Size = new Size(width, 25),
+                Size = new Size(w, 25),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(248, 249, 250),
-                ForeColor = _textColor,
+                ForeColor = Color.FromArgb(189, 195, 199),
                 Text = placeholder
             };
             tb.Enter += (s, ev) =>
@@ -298,13 +450,30 @@ namespace FinancialAnalyzer.Forms
             return tb;
         }
 
+        private Button CreateButton(string text, int x, int y, int w, Color back, Color fore)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                Location = new Point(x, y),
+                Size = new Size(w, 40),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = fore,
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            return btn;
+        }
+
         private void InitializeComponent()
         {
             this.SuspendLayout();
             // 
             // AssetForm
             // 
-            this.ClientSize = new System.Drawing.Size(501, 631);
+            this.ClientSize = new System.Drawing.Size(485, 680);
             this.Name = "AssetForm";
             this.ResumeLayout(false);
 

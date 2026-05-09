@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace FinancialAnalyzer.Models
 {
@@ -7,6 +8,7 @@ namespace FinancialAnalyzer.Models
     /// </summary>
     public class IncomeModel
     {
+        
         public enum IncomeSourceEnum
         {
             Salary = 0,
@@ -16,6 +18,7 @@ namespace FinancialAnalyzer.Models
             Other = 4
         }
 
+        [Key]
         public int Id { get; set; }
         public IncomeSourceEnum Source { get; set; }
         public string CustomName { get; set; }
@@ -27,9 +30,49 @@ namespace FinancialAnalyzer.Models
         public string TargetDepositName { get; set; }
 
         /// <summary>Месячный доход</summary>
+        /// <summary>Месячный доход с учётом налогов</summary>
         public decimal MonthlyAmount
         {
-            get { return AmountPerPayment * PaymentsPerMonth; }
+            get
+            {
+                decimal total = AmountPerPayment * PaymentsPerMonth;
+                if (!IsAfterTax)
+                {
+                    // Вычитаем НДФЛ 13%
+                    total = total * 0.87m;
+                }
+                return total;
+            }
+        }
+
+        /// <summary>Сумма до вычета налогов</summary>
+        public decimal GrossMonthlyAmount
+        {
+            get
+            {
+                return AmountPerPayment * PaymentsPerMonth;
+            }
+        }
+
+        /// <summary>Сумма налога (если есть)</summary>
+        public decimal TaxAmount
+        {
+            get
+            {
+                if (IsAfterTax) return 0;
+                return GrossMonthlyAmount * 0.13m;
+            }
+        }
+
+        public string TaxText
+        {
+            get
+            {
+                if (IsAfterTax)
+                    return "После налогов";
+                else
+                    return $"До налогов (-{TaxAmount:N0} ₽ НДФЛ)";
+            }
         }
 
         /// <summary>Годовой доход</summary>
@@ -52,11 +95,6 @@ namespace FinancialAnalyzer.Models
                     default: return "—";
                 }
             }
-        }
-
-        public string TaxText
-        {
-            get { return IsAfterTax ? "После налогов" : "До налогов"; }
         }
     }
 }

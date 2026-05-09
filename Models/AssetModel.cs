@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace FinancialAnalyzer.Models
 {
@@ -7,6 +8,7 @@ namespace FinancialAnalyzer.Models
     /// </summary>
     public class AssetModel
     {
+        
         /// <summary>Тип актива</summary>
         public enum AssetTypeEnum
         {
@@ -14,7 +16,7 @@ namespace FinancialAnalyzer.Models
             Currency = 1,   // Валюта
             Metal = 2       // Металлы
         }
-
+        [Key]
         /// <summary>Уникальный номер</summary>
         public int Id { get; set; }
 

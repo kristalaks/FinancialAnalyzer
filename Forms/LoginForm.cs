@@ -150,6 +150,14 @@ namespace FinancialAnalyzer.Forms
                 Location = new Point(40, 155),
                 Size = new Size(320, 20)
             };
+            // Загружаем сохранённый логин
+            string savedLogin = Properties.Settings.Default.RememberedLogin;
+            if (!string.IsNullOrEmpty(savedLogin))
+            {
+                _txtLogin.Text = savedLogin;
+                _txtLogin.ForeColor = _textColor;
+                _chkRemember.Checked = true;
+            }
 
             // Ошибка
             _lblError = new Label
@@ -266,13 +274,25 @@ namespace FinancialAnalyzer.Forms
                 return;
             }
 
-            // Заглушка входа (пока без БД)
-            if (login == "admin" && password == "admin")
+            // Сохраняем логин
+            if (_chkRemember.Checked)
+            {
+                Properties.Settings.Default.RememberedLogin = login;
+                Properties.Settings.Default.Save();
+            }
+            else
+            {
+                Properties.Settings.Default.RememberedLogin = "";
+                Properties.Settings.Default.Save();
+            }
+
+            // Проверка через БД
+            var user = Services.AuthService.Login(login, password);
+            if (user != null)
             {
                 _lblError.Text = "";
-                this.DialogResult = DialogResult.OK;
 
-                // Сохраняем логин если выбрано "Запомнить"
+                // Сохраняем логин
                 if (_chkRemember.Checked)
                 {
                     Properties.Settings.Default.RememberedLogin = login;
@@ -284,6 +304,7 @@ namespace FinancialAnalyzer.Forms
                     Properties.Settings.Default.Save();
                 }
 
+                this.DialogResult = DialogResult.OK;
                 this.Close();
             }
             else
@@ -300,9 +321,10 @@ namespace FinancialAnalyzer.Forms
 
         private void LinkRegister_Click(object sender, EventArgs e)
         {
-            // Пока заглушка
-            MessageBox.Show("Регистрация будет доступна после подключения базы данных.",
-                "Информация", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using (var form = new RegisterForm())
+            {
+                form.ShowDialog();
+            }
         }
 
         private void InitializeComponent()

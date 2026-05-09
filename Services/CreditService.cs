@@ -1,14 +1,38 @@
 ﻿using System;
 using System.Collections.Generic;
+using FinancialAnalyzer.Data;
 using FinancialAnalyzer.Models;
 
 namespace FinancialAnalyzer.Services
 {
     public static class CreditService
     {
-        /// <summary>
-        /// Расчёт аннуитетного платежа
-        /// </summary>
+        public static List<CreditModel> GetAll()
+        {
+            var credits = new List<CreditModel>();
+            var rows = Repository.ExecuteQuery("SELECT * FROM Credits ORDER BY Id");
+            foreach (var row in rows)
+            {
+                credits.Add(new CreditModel
+                {
+                    Id = Convert.ToInt32(row["Id"]),
+                    Name = row["Name"].ToString(),
+                    Type = (CreditModel.CreditTypeEnum)Convert.ToInt32(row["Type"]),
+                    TotalAmount = Convert.ToDecimal(row["TotalAmount"]),
+                    DownPayment = Convert.ToDecimal(row["DownPayment"]),
+                    InterestRate = Convert.ToDecimal(row["InterestRate"]),
+                    TermMonths = Convert.ToInt32(row["TermMonths"]),
+                    PaymentType = (CreditModel.PaymentTypeEnum)Convert.ToInt32(row["PaymentType"]),
+                    OpenDate = DateTime.Parse(row["OpenDate"].ToString()),
+                    MonthlyPayment = Convert.ToDecimal(row["MonthlyPayment"]),
+                    RemainingDebt = Convert.ToDecimal(row["RemainingDebt"]),
+                    PaidPrincipal = Convert.ToDecimal(row["PaidPrincipal"]),
+                    PaidInterest = Convert.ToDecimal(row["PaidInterest"])
+                });
+            }
+            return credits;
+        }
+
         public static decimal CalculateAnnuityPayment(decimal loanAmount, decimal annualRate, int months)
         {
             if (months <= 0 || loanAmount <= 0) return 0;
@@ -18,61 +42,49 @@ namespace FinancialAnalyzer.Services
             return loanAmount * monthlyRate * factor / (factor - 1);
         }
 
-        public static List<CreditModel> GetDemoCredits()
+        public static void Add(CreditModel credit)
         {
-            decimal mortgagePayment = CalculateAnnuityPayment(5000000m, 10.2m, 180);
+            Repository.ExecuteNonQuery(
+                @"INSERT INTO Credits (Name, Type, TotalAmount, DownPayment, InterestRate, TermMonths, PaymentType, OpenDate, MonthlyPayment, RemainingDebt, PaidPrincipal, PaidInterest)
+                  VALUES (@n, @t, @ta, @dp, @ir, @tm, @pt, @od, @mp, @rd, @pp, @pi)",
+                ("@n", credit.Name),
+                ("@t", (int)credit.Type),
+                ("@ta", credit.TotalAmount),
+                ("@dp", credit.DownPayment),
+                ("@ir", credit.InterestRate),
+                ("@tm", credit.TermMonths),
+                ("@pt", (int)credit.PaymentType),
+                ("@od", credit.OpenDate.ToString("yyyy-MM-dd")),
+                ("@mp", credit.MonthlyPayment),
+                ("@rd", credit.RemainingDebt),
+                ("@pp", credit.PaidPrincipal),
+                ("@pi", credit.PaidInterest));
+        }
 
-            return new List<CreditModel>
-            {
-                new CreditModel
-                {
-                    Id = 1,
-                    Name = "Ипотека Сбер",
-                    Type = CreditModel.CreditTypeEnum.Mortgage,
-                    TotalAmount = 5000000m,
-                    DownPayment = 1000000m,
-                    InterestRate = 10.2m,
-                    TermMonths = 180,
-                    PaymentType = CreditModel.PaymentTypeEnum.Annuity,
-                    OpenDate = new DateTime(2023, 6, 10),
-                    MonthlyPayment = Math.Round(mortgagePayment, 0),
-                    RemainingDebt = 3200000m,
-                    PaidPrincipal = 800000m,
-                    PaidInterest = 580000m
-                },
-                new CreditModel
-                {
-                    Id = 2,
-                    Name = "Автокредит ВТБ",
-                    Type = CreditModel.CreditTypeEnum.CarLoan,
-                    TotalAmount = 800000m,
-                    DownPayment = 200000m,
-                    InterestRate = 14.5m,
-                    TermMonths = 60,
-                    PaymentType = CreditModel.PaymentTypeEnum.Differentiated,
-                    OpenDate = new DateTime(2024, 3, 15),
-                    MonthlyPayment = 14300m,
-                    RemainingDebt = 450000m,
-                    PaidPrincipal = 150000m,
-                    PaidInterest = 42000m
-                },
-                new CreditModel
-                {
-                    Id = 3,
-                    Name = "Потребительский Альфа",
-                    Type = CreditModel.CreditTypeEnum.Consumer,
-                    TotalAmount = 200000m,
-                    DownPayment = 0,
-                    InterestRate = 18.0m,
-                    TermMonths = 36,
-                    PaymentType = CreditModel.PaymentTypeEnum.Annuity,
-                    OpenDate = new DateTime(2024, 8, 1),
-                    MonthlyPayment = 7200m,
-                    RemainingDebt = 120000m,
-                    PaidPrincipal = 80000m,
-                    PaidInterest = 19200m
-                }
-            };
+        public static void Update(CreditModel credit)
+        {
+            Repository.ExecuteNonQuery(
+                @"UPDATE Credits SET Name=@n, Type=@t, TotalAmount=@ta, DownPayment=@dp, InterestRate=@ir, 
+                  TermMonths=@tm, PaymentType=@pt, OpenDate=@od, MonthlyPayment=@mp, RemainingDebt=@rd, 
+                  PaidPrincipal=@pp, PaidInterest=@pi WHERE Id=@id",
+                ("@id", credit.Id),
+                ("@n", credit.Name),
+                ("@t", (int)credit.Type),
+                ("@ta", credit.TotalAmount),
+                ("@dp", credit.DownPayment),
+                ("@ir", credit.InterestRate),
+                ("@tm", credit.TermMonths),
+                ("@pt", (int)credit.PaymentType),
+                ("@od", credit.OpenDate.ToString("yyyy-MM-dd")),
+                ("@mp", credit.MonthlyPayment),
+                ("@rd", credit.RemainingDebt),
+                ("@pp", credit.PaidPrincipal),
+                ("@pi", credit.PaidInterest));
+        }
+
+        public static void Delete(int id)
+        {
+            Repository.ExecuteNonQuery("DELETE FROM Credits WHERE Id=@id", ("@id", id));
         }
     }
 }

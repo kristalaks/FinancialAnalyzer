@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace FinancialAnalyzer.Models
 {
@@ -7,6 +8,7 @@ namespace FinancialAnalyzer.Models
     /// </summary>
     public class CreditModel
     {
+        
         public enum CreditTypeEnum
         {
             Mortgage = 0,
@@ -22,6 +24,7 @@ namespace FinancialAnalyzer.Models
             Differentiated = 1  // Дифференцированный (уменьшающиеся)
         }
 
+        [Key]
         public int Id { get; set; }
         public string Name { get; set; }
         public CreditTypeEnum Type { get; set; }

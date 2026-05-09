@@ -19,6 +19,7 @@ namespace FinancialAnalyzer.Forms
         private DateTimePicker _dtpDate;
         private TextBox _txtNote;
         private Label _lblError;
+        private ComboBox _cmbSourceReserve;
 
         public ExpenseModel Result { get; private set; }
         private ExpenseModel _existing;
@@ -115,6 +116,23 @@ namespace FinancialAnalyzer.Forms
             _txtNote = AddTextBox(left, y, width, "");
             y += 45;
 
+            // Списание с резерва
+            AddLabel("Списывать с (опционально):", left, y); y += 22;
+            _cmbSourceReserve = new ComboBox
+            {
+                Font = new Font("Segoe UI", 10),
+                Location = new Point(left, y),
+                Size = new Size(width, 25),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            _cmbSourceReserve.Items.Add("Свободный остаток");
+            var reserves = Services.ReserveService.GetAll();
+            foreach (var r in reserves)
+                _cmbSourceReserve.Items.Add(r.Name);
+            _cmbSourceReserve.SelectedIndex = 0;
+            this.Controls.Add(_cmbSourceReserve);
+            y += 45;
+
             // Ошибка
             _lblError = new Label { Font = new Font("Segoe UI", 9), ForeColor = Color.FromArgb(231, 76, 60), Location = new Point(left, y), Size = new Size(width, 20) };
             this.Controls.Add(_lblError);
@@ -141,6 +159,19 @@ namespace FinancialAnalyzer.Forms
 
             bool isCustom = _cmbCategory.SelectedIndex == 10;
 
+            int? sourceReserveId = null;
+            string sourceReserveName = null;
+            if (_cmbSourceReserve != null && _cmbSourceReserve.SelectedIndex > 0)
+            {
+                var reservesList = Services.ReserveService.GetAll();
+                int idx = _cmbSourceReserve.SelectedIndex - 1;
+                if (idx >= 0 && idx < reservesList.Count)
+                {
+                    sourceReserveId = reservesList[idx].Id;
+                    sourceReserveName = reservesList[idx].Name;
+                }
+            }
+
             Result = new ExpenseModel
             {
                 Id = _existing?.Id ?? 0,
@@ -150,7 +181,9 @@ namespace FinancialAnalyzer.Forms
                 Amount = amt,
                 Period = (ExpenseModel.ExpensePeriodEnum)_cmbPeriod.SelectedIndex,
                 Date = _dtpDate.Value,
-                Note = string.IsNullOrWhiteSpace(_txtNote.Text) ? null : _txtNote.Text.Trim()
+                Note = string.IsNullOrWhiteSpace(_txtNote.Text) ? null : _txtNote.Text.Trim(),
+                SourceReserveId = sourceReserveId,
+                SourceReserveName = sourceReserveName
             };
 
             _lblError.Text = "";
@@ -185,7 +218,7 @@ namespace FinancialAnalyzer.Forms
             // 
             // ExpenseForm
             // 
-            this.ClientSize = new System.Drawing.Size(478, 599);
+            this.ClientSize = new System.Drawing.Size(488, 709);
             this.Name = "ExpenseForm";
             this.ResumeLayout(false);
 

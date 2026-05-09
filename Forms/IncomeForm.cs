@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using FinancialAnalyzer.Models;
+using FinancialAnalyzer.Services;
 
 namespace FinancialAnalyzer.Forms
 {
@@ -18,7 +19,6 @@ namespace FinancialAnalyzer.Forms
         private CheckBox _chkAfterTax;
         private DateTimePicker _dtpStartDate;
         private ComboBox _cmbTargetDeposit;
-        private NumericUpDown _nudTargetPercent;
         private Label _lblError;
         private Label _lblCalc;
 
@@ -53,6 +53,7 @@ namespace FinancialAnalyzer.Forms
                     }
                 }
             }
+            UpdateCalc();
         }
 
         private void SetupForm()
@@ -76,7 +77,7 @@ namespace FinancialAnalyzer.Forms
             _txtCustomName = AddTextBox(left, y, width, "Название источника"); _txtCustomName.Visible = false; y += 30;
 
             // Сумма
-            AddLabel("Сумма за одну выплату (₽):", left, y); y += 22;
+            AddLabel("Сумма за одну выплату (₽, до налогов):", left, y); y += 22;
             _txtAmount = AddTextBox(left, y, width, "80000"); y += 45;
 
             // Выплат в месяц
@@ -89,6 +90,7 @@ namespace FinancialAnalyzer.Forms
             _chkAfterTax = new CheckBox { Text = "Сумма указана после вычета налогов", Font = new Font("Segoe UI", 10), ForeColor = _textColor, Location = new Point(left, y), Size = new Size(width, 25), Checked = true };
             this.Controls.Add(_chkAfterTax);
             y += 35;
+            _chkAfterTax.CheckedChanged += (s, e) => UpdateCalc();
 
             // Дата начала
             AddLabel("Дата начала поступлений:", left, y); y += 22;
@@ -99,7 +101,12 @@ namespace FinancialAnalyzer.Forms
             // Направление на вклад
             AddLabel("Направлять на накопительный счёт (опционально):", left, y); y += 22;
             _cmbTargetDeposit = new ComboBox { Font = new Font("Segoe UI", 10), Location = new Point(left, y), Size = new Size(270, 25), DropDownStyle = ComboBoxStyle.DropDownList };
-            _cmbTargetDeposit.Items.AddRange(new[] { "Не направлять", "Сбербанк — Накопительный", "ВТБ — Срочный", "Альфа-Банк — Премиум" });
+            _cmbTargetDeposit.Items.Add("Не направлять");
+            var deposits = Services.DepositService.GetAll();
+            foreach (var dep in deposits)
+            {
+                _cmbTargetDeposit.Items.Add(dep.Name);
+            }
             _cmbTargetDeposit.SelectedIndex = 0;
             this.Controls.Add(_cmbTargetDeposit);
             y += 45;
@@ -132,8 +139,14 @@ namespace FinancialAnalyzer.Forms
         {
             if (decimal.TryParse(_txtAmount.Text, out decimal amt))
             {
-                decimal monthly = amt * _nudPaymentsPerMonth.Value;
-                _lblCalc.Text = $"Месячный доход: {monthly:N0} ₽   •   Годовой: {monthly * 12:N0} ₽";
+                int payments = (int)_nudPaymentsPerMonth.Value;
+                decimal gross = amt * payments;
+                decimal net = _chkAfterTax.Checked ? gross : gross * 0.87m;
+                decimal tax = _chkAfterTax.Checked ? 0 : gross * 0.13m;
+
+                _lblCalc.Text = _chkAfterTax.Checked
+                    ? $"Месячный доход: {net:N0} ₽ (чистыми)   •   Годовой: {net * 12:N0} ₽"
+                    : $"До налогов: {gross:N0} ₽   •   НДФЛ: {tax:N0} ₽   •   На руки: {net:N0} ₽/мес";
             }
         }
 

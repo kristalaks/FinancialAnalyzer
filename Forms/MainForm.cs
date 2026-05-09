@@ -1,7 +1,12 @@
 ﻿using FinancialAnalyzer.Models;
+using FinancialAnalyzer.Services;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
+using System.Windows.Forms.DataVisualization;
+using System.Windows.Forms.DataVisualization.Charting;
 
 namespace FinancialAnalyzer.Forms
 {
@@ -135,14 +140,15 @@ namespace FinancialAnalyzer.Forms
                 Dock = DockStyle.Fill
             };
 
+            string displayName = Services.AuthService.CurrentUser?.DisplayName ?? "Пользователь";
             var lblUser = new Label
             {
-                Text = "👤 Зыкин Егор",
+                Text = $"👤 {displayName}",
                 Font = new Font("Segoe UI", 10),
                 ForeColor = _textDark,
                 TextAlign = ContentAlignment.MiddleRight,
                 Dock = DockStyle.Right,
-                Width = 150
+                Width = 200
             };
 
             _headerPanel.Controls.Add(lblUser);
@@ -297,9 +303,10 @@ namespace FinancialAnalyzer.Forms
         {
             _contentPanel.Controls.Clear();
 
-            // Список вкладов (пока демо-данные)
-            var deposits = Services.DepositService.GetDemoDeposits();
+            // Список вкладов из БД
+            var deposits = Services.DepositService.GetAll();
 
+            // Верхняя панель с заголовком и кнопкой
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -335,22 +342,15 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        // Пока просто показываем сообщение
-                        // Позже будем добавлять в БД
-                        MessageBox.Show(
-                            $"Вклад \"{form.Result.Name}\" добавлен!\n" +
-                            $"Сумма: {form.Result.InitialAmount:N0} ₽\n" +
-                            $"Ставка: {form.Result.InterestRate}%\n" +
-                            $"Тип: {form.Result.RateTypeText}",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
+                        DepositService.Add(form.Result);
+                        ShowDepositsView();
                     }
                 }
             };
 
             topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd });
 
+            // Панель с таблицей
             var tablePanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -418,7 +418,7 @@ namespace FinancialAnalyzer.Forms
             for (int i = 0; i < deposits.Count; i++)
             {
                 var d = deposits[i];
-                int rowIndex = dataGridView.Rows.Add(
+                dataGridView.Rows.Add(
                     d.Id,
                     d.Name,
                     d.CurrentAmount,
@@ -426,14 +426,30 @@ namespace FinancialAnalyzer.Forms
                     d.RateTypeText,
                     d.ChangeText
                 );
-
-                // Цвет строки изменения
-                var changeCell = dataGridView.Rows[rowIndex].Cells["colChange"];
-                changeCell.Style.ForeColor = d.IsPositive
-                    ? Color.FromArgb(46, 204, 113)
-                    : Color.FromArgb(231, 76, 60);
-                changeCell.Style.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             }
+
+            // Срабатывает при каждой отрисовке ячейки, гарантирует правильный цвет
+            dataGridView.CellFormatting += (s, e) =>
+            {
+                if (e.ColumnIndex == dataGridView.Columns["colChange"].Index && e.RowIndex >= 0)
+                {
+                    var value = dataGridView.Rows[e.RowIndex].Cells["colChange"].Value;
+                    if (value != null)
+                    {
+                        string text = value.ToString();
+                        if (text.StartsWith("+"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(46, 204, 113);   
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(46, 204, 113); 
+                        }
+                        else if (text.StartsWith("-"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(231, 76, 60);      // красный
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(231, 76, 60); // красный при выделении
+                        }
+                    }
+                }
+            };
 
             // Выбор строки
             dataGridView.SelectionChanged += (s, e) =>
@@ -450,7 +466,7 @@ namespace FinancialAnalyzer.Forms
 
             tablePanel.Controls.Add(dataGridView);
 
-
+            // Панель деталей
             var detailsPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -458,10 +474,7 @@ namespace FinancialAnalyzer.Forms
                 Padding = new Padding(20)
             };
 
-            _depositDetailsPanel = detailsPanel;  // сохраняем ссылку для обновления
-
-            tablePanel.Controls.Add(dataGridView);
-
+            _depositDetailsPanel = detailsPanel;
 
             _contentPanel.Controls.Add(detailsPanel);
             _contentPanel.Controls.Add(tablePanel);
@@ -538,9 +551,8 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show("Изменения сохранены!", "Успешно",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        ShowDepositsView();  // обновляем вид
+                        DepositService.Update(form.Result);
+                        ShowDepositsView();
                     }
                 }
             };
@@ -567,8 +579,7 @@ namespace FinancialAnalyzer.Forms
 
                 if (result == DialogResult.Yes)
                 {
-                    MessageBox.Show("Вклад удалён (демо).", "Успешно",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    DepositService.Delete(deposit.Id);
                     ShowDepositsView();
                 }
             };
@@ -582,11 +593,9 @@ namespace FinancialAnalyzer.Forms
         {
             _contentPanel.Controls.Clear();
 
-            var stocks = Services.AssetService.GetDemoStocks();
+            var stocks = Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Stock);
+            DataGridView dataGridView = null;
 
-            // ==========================================
-            // Верхняя панель с заголовком и поиском
-            // ==========================================
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -624,6 +633,26 @@ namespace FinancialAnalyzer.Forms
                 if (string.IsNullOrWhiteSpace(txtSearch.Text))
                     txtSearch.Text = "🔍 Поиск по тикеру или названию";
             };
+            txtSearch.TextChanged += (s, ev) =>
+            {
+                string filter = txtSearch.Text.ToUpper();
+                if (filter == "🔍 ПОИСК ПО ТИКЕРУ ИЛИ НАЗВАНИЮ") filter = "";
+
+                foreach (DataGridViewRow row in dataGridView.Rows)
+                {
+                    if (row.IsNewRow) continue;
+                    bool visible = false;
+                    for (int i = 1; i < row.Cells.Count; i++)
+                    {
+                        if (row.Cells[i].Value?.ToString().ToUpper().Contains(filter) == true)
+                        {
+                            visible = true;
+                            break;
+                        }
+                    }
+                    row.Visible = visible;
+                }
+            };
 
             var btnAdd = new Button
             {
@@ -643,23 +672,41 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show(
-                            $"Актив \"{form.Result.Ticker}\" добавлен!\n" +
-                            $"Компания: {form.Result.CompanyName}\n" +
-                            $"Количество: {form.Result.Quantity}\n" +
-                            $"Цена покупки: {form.Result.PurchasePrice:F2} ₽",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
+                        AssetService.Add(form.Result);
+                        ShowStocksView();
                     }
                 }
             };
+            var btnUpdate = new Button
+            {
+                Text = "🔄 Обновить цены",
+                Font = new Font("Segoe UI", 9),
+                Location = new Point(240, 15),
+                Size = new Size(150, 30),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(236, 240, 241),
+                ForeColor = _textDark,
+                Cursor = Cursors.Hand
+            };
+            btnUpdate.FlatAppearance.BorderSize = 0;
+            btnUpdate.Click += (s, ev) =>
+            {
+                Cursor = Cursors.WaitCursor;
+                try
+                {
+                    MarketDataService.UpdateAllPrices();
+                    ShowStocksView();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Не удалось обновить цены. Проверьте подключение к интернету.\n\n" + ex.Message,
+                        "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                Cursor = Cursors.Default;
+            };
 
-            topPanel.Controls.AddRange(new Control[] { lblTitle, txtSearch, btnAdd });
+            topPanel.Controls.AddRange(new Control[] { lblTitle, btnUpdate, txtSearch, btnAdd });
 
-            // ==========================================
-            // Таблица акций
-            // ==========================================
             var tablePanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -668,7 +715,7 @@ namespace FinancialAnalyzer.Forms
                 Padding = new Padding(20, 0, 20, 10)
             };
 
-            var dataGridView = new DataGridView
+            dataGridView = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 BackgroundColor = Color.White,
@@ -717,11 +764,10 @@ namespace FinancialAnalyzer.Forms
             dataGridView.Columns["colChange"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             dataGridView.Columns["colChange"].FillWeight = 10;
 
-            // Заполнение
             for (int i = 0; i < stocks.Count; i++)
             {
                 var s = stocks[i];
-                int rowIndex = dataGridView.Rows.Add(
+                dataGridView.Rows.Add(
                     s.Id,
                     s.Ticker,
                     s.CompanyName,
@@ -729,14 +775,29 @@ namespace FinancialAnalyzer.Forms
                     s.CurrentPrice,
                     s.ChangeText
                 );
-
-                // Цвет всей строки по прибыльности
-                var changeCell = dataGridView.Rows[rowIndex].Cells["colChange"];
-                changeCell.Style.ForeColor = s.IsPositive
-                    ? Color.FromArgb(46, 204, 113)
-                    : Color.FromArgb(231, 76, 60);
-                changeCell.Style.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             }
+
+            dataGridView.CellFormatting += (s, e) =>
+            {
+                if (e.ColumnIndex == dataGridView.Columns["colChange"].Index && e.RowIndex >= 0)
+                {
+                    var value = dataGridView.Rows[e.RowIndex].Cells["colChange"].Value;
+                    if (value != null)
+                    {
+                        string text = value.ToString();
+                        if (text.StartsWith("+"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(46, 204, 113);
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(46, 204, 113);
+                        }
+                        else if (text.StartsWith("-"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(231, 76, 60);
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(231, 76, 60);
+                        }
+                    }
+                }
+            };
 
             dataGridView.SelectionChanged += (s, e) =>
             {
@@ -752,9 +813,6 @@ namespace FinancialAnalyzer.Forms
 
             tablePanel.Controls.Add(dataGridView);
 
-            // ==========================================
-            // Панель деталей
-            // ==========================================
             var detailsPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -764,7 +822,6 @@ namespace FinancialAnalyzer.Forms
 
             _assetDetailsPanel = detailsPanel;
 
-            // Сборка
             _contentPanel.Controls.Add(detailsPanel);
             _contentPanel.Controls.Add(tablePanel);
             _contentPanel.Controls.Add(topPanel);
@@ -772,7 +829,7 @@ namespace FinancialAnalyzer.Forms
             if (stocks.Count > 0)
                 ShowAssetDetails(stocks[0]);
         }
-        
+
         private void ShowAssetDetails(Models.AssetModel asset)
         {
             if (_assetDetailsPanel == null)
@@ -927,8 +984,7 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show("Изменения сохранены!", "Успешно",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        AssetService.Update(form.Result);
                         ShowStocksView();
                     }
                 }
@@ -955,8 +1011,7 @@ namespace FinancialAnalyzer.Forms
                     MessageBoxIcon.Question);
                 if (result == DialogResult.Yes)
                 {
-                    MessageBox.Show("Актив удалён (демо).", "Успешно",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    AssetService.Delete(asset.Id);
                     ShowStocksView();
                 }
             };
@@ -971,7 +1026,7 @@ namespace FinancialAnalyzer.Forms
         {
             ShowAssetListView(
                 "💱 Валюты",
-                Services.AssetService.GetDemoCurrencies(),
+                Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Currency),
                 AssetModel.AssetTypeEnum.Currency);
         }
 
@@ -979,14 +1034,15 @@ namespace FinancialAnalyzer.Forms
         {
             ShowAssetListView(
                 "🪙 Металлы",
-                Services.AssetService.GetDemoMetals(),
+                Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Metal),
                 AssetModel.AssetTypeEnum.Metal);
         }
 
         private void ShowAssetListView(string title, System.Collections.Generic.List<AssetModel> assets,
-            AssetModel.AssetTypeEnum assetType)
+    AssetModel.AssetTypeEnum assetType)
         {
             _contentPanel.Controls.Clear();
+            DataGridView dataGridView = null;
 
             // Верхняя панель
             var topPanel = new Panel
@@ -1024,15 +1080,7 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show(
-                            $"Актив \"{form.Result.Ticker}\" добавлен!\n" +
-                            $"Название: {form.Result.CompanyName}\n" +
-                            $"Количество: {form.Result.Quantity}\n" +
-                            $"Цена покупки: {form.Result.PurchasePrice:F2} ₽",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-                        // Обновить вид
+                        AssetService.Add(form.Result);
                         if (assetType == AssetModel.AssetTypeEnum.Currency)
                             ShowCurrencyView();
                         else
@@ -1041,7 +1089,66 @@ namespace FinancialAnalyzer.Forms
                 }
             };
 
-            topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd });
+            var btnUpdate = new Button
+            {
+                Text = "🔄 Обновить",
+                Font = new Font("Segoe UI", 9),
+                Location = new Point(750, 15),
+                Size = new Size(130, 30),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(236, 240, 241),
+                ForeColor = _textDark,
+                Cursor = Cursors.Hand
+            };
+            btnUpdate.FlatAppearance.BorderSize = 0;
+            btnUpdate.Click += (s, ev) =>
+            {
+                Cursor = Cursors.WaitCursor;
+                try
+                {
+                    MarketDataService.UpdateAllPrices();
+                    if (assetType == AssetModel.AssetTypeEnum.Currency)
+                        ShowCurrencyView();
+                    else
+                        ShowMetalsView();
+                }
+                catch
+                {
+                    MessageBox.Show("Не удалось обновить. Проверьте интернет.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                Cursor = Cursors.Default;
+            };
+
+            var txtSearch = new TextBox
+            {
+                Font = new Font("Segoe UI", 10),
+                Location = new Point(350, 15),
+                Size = new Size(180, 25),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(248, 249, 250),
+                ForeColor = _textDark,
+                Text = "🔍 Поиск"
+            };
+            txtSearch.Enter += (s, ev) => { if (txtSearch.Text == "🔍 Поиск") txtSearch.Text = ""; };
+            txtSearch.Leave += (s, ev) => { if (string.IsNullOrWhiteSpace(txtSearch.Text)) txtSearch.Text = "🔍 Поиск"; };
+            txtSearch.TextChanged += (s, ev) =>
+            {
+                string filter = txtSearch.Text.ToUpper();
+                if (filter == "🔍 ПОИСК") filter = "";
+                foreach (DataGridViewRow row in dataGridView.Rows)
+                {
+                    if (row.IsNewRow) continue;
+                    bool visible = false;
+                    for (int i = 1; i < row.Cells.Count; i++)
+                    {
+                        if (row.Cells[i].Value?.ToString().ToUpper().Contains(filter) == true)
+                        { visible = true; break; }
+                    }
+                    row.Visible = visible;
+                }
+            };
+
+            topPanel.Controls.AddRange(new Control[] { lblTitle, txtSearch, btnUpdate, btnAdd });
 
             // Таблица
             var tablePanel = new Panel
@@ -1052,7 +1159,7 @@ namespace FinancialAnalyzer.Forms
                 Padding = new Padding(20, 0, 20, 10)
             };
 
-            var dataGridView = new DataGridView
+            dataGridView = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 BackgroundColor = Color.White,
@@ -1104,15 +1211,31 @@ namespace FinancialAnalyzer.Forms
             for (int i = 0; i < assets.Count; i++)
             {
                 var a = assets[i];
-                int rowIndex = dataGridView.Rows.Add(
+                dataGridView.Rows.Add(
                     a.Id, a.Ticker, a.CompanyName, a.Quantity, a.CurrentPrice, a.ChangeText);
-
-                var changeCell = dataGridView.Rows[rowIndex].Cells["colChange"];
-                changeCell.Style.ForeColor = a.IsPositive
-                    ? Color.FromArgb(46, 204, 113)
-                    : Color.FromArgb(231, 76, 60);
-                changeCell.Style.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             }
+
+            dataGridView.CellFormatting += (s, e) =>
+            {
+                if (e.ColumnIndex == dataGridView.Columns["colChange"].Index && e.RowIndex >= 0)
+                {
+                    var value = dataGridView.Rows[e.RowIndex].Cells["colChange"].Value;
+                    if (value != null)
+                    {
+                        string text = value.ToString();
+                        if (text.StartsWith("+"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(46, 204, 113);
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(46, 204, 113);
+                        }
+                        else if (text.StartsWith("-"))
+                        {
+                            e.CellStyle.ForeColor = Color.FromArgb(231, 76, 60);
+                            e.CellStyle.SelectionForeColor = Color.FromArgb(231, 76, 60);
+                        }
+                    }
+                }
+            };
 
             dataGridView.SelectionChanged += (s, e) =>
             {
@@ -1128,7 +1251,6 @@ namespace FinancialAnalyzer.Forms
 
             tablePanel.Controls.Add(dataGridView);
 
-            // Панель деталей
             var detailsPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -1137,7 +1259,6 @@ namespace FinancialAnalyzer.Forms
             };
             _assetDetailsPanel = detailsPanel;
 
-            // Сборка
             _contentPanel.Controls.Add(detailsPanel);
             _contentPanel.Controls.Add(tablePanel);
             _contentPanel.Controls.Add(topPanel);
@@ -1256,8 +1377,7 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show("Изменения сохранены!", "Успешно",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Services.ReserveService.Update(form.Result);
                         ShowReserveView();
                     }
                 }
@@ -1281,8 +1401,7 @@ namespace FinancialAnalyzer.Forms
                     "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (result == DialogResult.Yes)
                 {
-                    MessageBox.Show("Резерв удалён (демо).", "Успешно",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    Services.ReserveService.Delete(reserve.Id);
                     ShowReserveView();
                 }
             };
@@ -1296,9 +1415,8 @@ namespace FinancialAnalyzer.Forms
         {
             _contentPanel.Controls.Clear();
 
-            var reserves = Services.ReserveService.GetDemoReserves();
+            var reserves = Services.ReserveService.GetAll();
 
-            // Верхняя панель
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -1334,12 +1452,7 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show(
-                            $"Резерв \"{form.Result.Name}\" добавлен!\n" +
-                            $"Сумма: {form.Result.Amount:N0} ₽",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
+                        Services.ReserveService.Add(form.Result);
                         ShowReserveView();
                     }
                 }
@@ -1347,7 +1460,6 @@ namespace FinancialAnalyzer.Forms
 
             topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd });
 
-            // Таблица
             var tablePanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -1409,7 +1521,7 @@ namespace FinancialAnalyzer.Forms
             for (int i = 0; i < reserves.Count; i++)
             {
                 var r = reserves[i];
-                int rowIndex = dataGridView.Rows.Add(
+                dataGridView.Rows.Add(
                     r.Id,
                     r.Name,
                     r.Amount,
@@ -1417,11 +1529,17 @@ namespace FinancialAnalyzer.Forms
                     r.ChangeText,
                     r.RealValue
                 );
-
-                var lossCell = dataGridView.Rows[rowIndex].Cells["colLoss"];
-                lossCell.Style.ForeColor = Color.FromArgb(231, 76, 60);
-                lossCell.Style.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             }
+
+            dataGridView.CellFormatting += (s, e) =>
+            {
+                if (e.ColumnIndex == dataGridView.Columns["colLoss"].Index && e.RowIndex >= 0)
+                {
+                    e.CellStyle.ForeColor = Color.FromArgb(231, 76, 60);
+                    e.CellStyle.SelectionForeColor = Color.FromArgb(231, 76, 60);
+                    e.CellStyle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                }
+            };
 
             dataGridView.SelectionChanged += (s, ev) =>
             {
@@ -1435,7 +1553,6 @@ namespace FinancialAnalyzer.Forms
 
             tablePanel.Controls.Add(dataGridView);
 
-            // Панель деталей
             var detailsPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -1456,33 +1573,26 @@ namespace FinancialAnalyzer.Forms
         private void ShowIncomesView()
         {
             _contentPanel.Controls.Clear();
-            var incomes = Services.IncomeService.GetDemoIncomes();
+            var incomes = Services.IncomeService.GetAll();
             decimal totalMonthly = 0;
+            IncomeModel selectedIncome = null;
 
+            // Верхняя панель с кнопками
             var topPanel = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Color.White, Padding = new Padding(20, 12, 20, 10) };
-            var lblTitle = new Label { Text = "💰 Доходы", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = _textDark, Location = new Point(20, 12), Size = new Size(300, 35) };
-            var btnAdd = new Button { Text = "+ Добавить", Font = new Font("Segoe UI", 11, FontStyle.Bold), Location = new Point(900, 15), Size = new Size(160, 35), FlatStyle = FlatStyle.Flat, BackColor = _sidebarActiveColor, ForeColor = Color.White, Cursor = Cursors.Hand };
-            btnAdd.FlatAppearance.BorderSize = 0;
-            btnAdd.Click += (s, e) =>
-            {
-                using (var form = new IncomeForm())
-                {
-                    if (form.ShowDialog() == DialogResult.OK)
-                    {
-                        MessageBox.Show(
-                            $"Доход добавлен!\n" +
-                            $"Источник: {form.Result.SourceText}\n" +
-                            $"Сумма: {form.Result.AmountPerPayment:N0} ₽ × {form.Result.PaymentsPerMonth} раз/мес\n" +
-                            $"Месячный доход: {form.Result.MonthlyAmount:N0} ₽",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-                        ShowIncomesView();
-                    }
-                }
-            };
-            topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd });
+            var lblTitle = new Label { Text = "💰 Доходы", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = _textDark, Location = new Point(20, 12), Size = new Size(200, 35) };
 
+            var btnAdd = new Button { Text = "+ Добавить", Font = new Font("Segoe UI", 11, FontStyle.Bold), Location = new Point(750, 13), Size = new Size(130, 35), FlatStyle = FlatStyle.Flat, BackColor = _sidebarActiveColor, ForeColor = Color.White, Cursor = Cursors.Hand };
+            btnAdd.FlatAppearance.BorderSize = 0;
+
+            var btnEdit = new Button { Text = "✏ Изменить", Font = new Font("Segoe UI", 10), Location = new Point(890, 13), Size = new Size(120, 35), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(236, 240, 241), ForeColor = _textDark, Cursor = Cursors.Hand, Enabled = false };
+            btnEdit.FlatAppearance.BorderSize = 0;
+
+            var btnDelete = new Button { Text = "🗑 Удалить", Font = new Font("Segoe UI", 10), Location = new Point(1020, 13), Size = new Size(120, 35), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(253, 237, 236), ForeColor = Color.FromArgb(231, 76, 60), Cursor = Cursors.Hand, Enabled = false };
+            btnDelete.FlatAppearance.BorderSize = 0;
+
+            topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd, btnEdit, btnDelete });
+
+            // Таблица
             var tablePanel = new Panel { Dock = DockStyle.Top, Height = 200, BackColor = _contentColor, Padding = new Padding(20, 0, 20, 10) };
             var dataGridView = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Color.White, BorderStyle = BorderStyle.None, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, ReadOnly = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, Font = new Font("Segoe UI", 10) };
             dataGridView.EnableHeadersVisualStyles = false;
@@ -1498,7 +1608,7 @@ namespace FinancialAnalyzer.Forms
             dataGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dataGridView.Columns.Add("colId", "#"); dataGridView.Columns["colId"].FillWeight = 5;
             dataGridView.Columns.Add("colSource", "Источник"); dataGridView.Columns["colSource"].FillWeight = 25;
-            dataGridView.Columns.Add("colAmount", "Сумма/выплата"); dataGridView.Columns["colAmount"].DefaultCellStyle.Format = "N0"; dataGridView.Columns["colAmount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight; dataGridView.Columns["colAmount"].FillWeight = 15;
+            dataGridView.Columns.Add("colAmount", "Выплата (гросс)"); dataGridView.Columns["colAmount"].DefaultCellStyle.Format = "N0"; dataGridView.Columns["colAmount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight; dataGridView.Columns["colAmount"].FillWeight = 15;
             dataGridView.Columns.Add("colCount", "Выплат/мес"); dataGridView.Columns["colCount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter; dataGridView.Columns["colCount"].FillWeight = 12;
             dataGridView.Columns.Add("colMonthly", "В месяц"); dataGridView.Columns["colMonthly"].DefaultCellStyle.Format = "N0"; dataGridView.Columns["colMonthly"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight; dataGridView.Columns["colMonthly"].FillWeight = 15;
             dataGridView.Columns.Add("colTax", "Налог"); dataGridView.Columns["colTax"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter; dataGridView.Columns["colTax"].FillWeight = 13;
@@ -1507,20 +1617,75 @@ namespace FinancialAnalyzer.Forms
             foreach (var inc in incomes)
             {
                 totalMonthly += inc.MonthlyAmount;
-                dataGridView.Rows.Add(inc.Id, inc.SourceText, inc.AmountPerPayment, inc.PaymentsPerMonth, inc.MonthlyAmount, inc.TaxText, inc.TargetDepositName ?? "—");
+                dataGridView.Rows.Add(inc.Id, inc.SourceText, inc.GrossMonthlyAmount / inc.PaymentsPerMonth, inc.PaymentsPerMonth, inc.MonthlyAmount, inc.TaxText, inc.TargetDepositName ?? "—");
             }
 
-            // Итоговая строка
-            dataGridView.Rows.Add("", "ИТОГО:", "", "", totalMonthly, "", "");
-            var totalRow = dataGridView.Rows[dataGridView.Rows.Count - 1];
-            totalRow.DefaultCellStyle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-            totalRow.DefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
-            totalRow.Cells["colMonthly"].Style.Format = "N0";
+            if (incomes.Count > 0)
+            {
+                dataGridView.Rows.Add("", "ИТОГО:", "", "", totalMonthly, "", "");
+                var totalRow = dataGridView.Rows[dataGridView.Rows.Count - 1];
+                totalRow.DefaultCellStyle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                totalRow.DefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            }
+
+            // Обработчик выбора строки
+            dataGridView.CellClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.RowIndex < incomes.Count)
+                {
+                    selectedIncome = incomes[e.RowIndex];
+                    btnEdit.Enabled = true;
+                    btnDelete.Enabled = true;
+                }
+                else
+                {
+                    selectedIncome = null;
+                    btnEdit.Enabled = false;
+                    btnDelete.Enabled = false;
+                }
+            };
+
+            // Кнопки действий
+            btnAdd.Click += (s, e) =>
+            {
+                using (var form = new IncomeForm())
+                {
+                    if (form.ShowDialog() == DialogResult.OK)
+                    {
+                        Services.IncomeService.Add(form.Result);
+                        ShowIncomesView();
+                    }
+                }
+            };
+
+            btnEdit.Click += (s, e) =>
+            {
+                if (selectedIncome != null)
+                {
+                    using (var form = new IncomeForm(selectedIncome))
+                    {
+                        if (form.ShowDialog() == DialogResult.OK)
+                        {
+                            Services.IncomeService.Update(form.Result);
+                            ShowIncomesView();
+                        }
+                    }
+                }
+            };
+
+            btnDelete.Click += (s, e) =>
+            {
+                if (selectedIncome != null && MessageBox.Show($"Удалить доход \"{selectedIncome.SourceText}\"?", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    Services.IncomeService.Delete(selectedIncome.Id);
+                    ShowIncomesView();
+                }
+            };
 
             tablePanel.Controls.Add(dataGridView);
 
             var summaryPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(20) };
-            var lblSummary = new Label { Text = $"Общий доход: {totalMonthly:N0} ₽/мес ({totalMonthly * 12:N0} ₽/год)", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.FromArgb(46, 204, 113), Location = new Point(20, 20), Size = new Size(600, 35) };
+            var lblSummary = new Label { Text = $"Общий доход: {totalMonthly:N0} ₽/мес ({totalMonthly * 12:N0} ₽/год)", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.FromArgb(46, 204, 113), Location = new Point(20, 15), Size = new Size(600, 35) };
             summaryPanel.Controls.Add(lblSummary);
 
             _contentPanel.Controls.Add(summaryPanel);
@@ -1531,34 +1696,23 @@ namespace FinancialAnalyzer.Forms
         private void ShowExpensesView()
         {
             _contentPanel.Controls.Clear();
-            var expenses = Services.ExpenseService.GetDemoExpenses();
+            var expenses = Services.ExpenseService.GetAll();
             decimal totalMonthly = 0;
+            ExpenseModel selectedExpense = null;
 
             var topPanel = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Color.White, Padding = new Padding(20, 12, 20, 10) };
-            var lblTitle = new Label { Text = "🛒 Расходы", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = _textDark, Location = new Point(20, 12), Size = new Size(300, 35) };
-            var btnAdd = new Button { Text = "+ Добавить", Font = new Font("Segoe UI", 11, FontStyle.Bold), Location = new Point(900, 15), Size = new Size(160, 35), FlatStyle = FlatStyle.Flat, BackColor = _sidebarActiveColor, ForeColor = Color.White, Cursor = Cursors.Hand };
-            btnAdd.FlatAppearance.BorderSize = 0;
-            btnAdd.Click += (s, e) =>
-            {
-                using (var form = new ExpenseForm())
-                {
-                    if (form.ShowDialog() == DialogResult.OK)
-                    {
-                        MessageBox.Show(
-                            $"Расход добавлен!\n" +
-                            $"Категория: {form.Result.CategoryText}\n" +
-                            $"Название: {form.Result.Name}\n" +
-                            $"Сумма: {form.Result.Amount:N0} ₽ ({form.Result.PeriodText})",
-                            "Успешно",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-                        ShowExpensesView();
-                    }
-                }
-            };
-            topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd });
+            var lblTitle = new Label { Text = "🛒 Расходы", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = _textDark, Location = new Point(20, 12), Size = new Size(200, 35) };
 
-            var tablePanel = new Panel { Dock = DockStyle.Top, Height = 240, BackColor = _contentColor, Padding = new Padding(20, 0, 20, 10) };
+            var btnAdd = new Button { Text = "+ Добавить", Font = new Font("Segoe UI", 11, FontStyle.Bold), Location = new Point(750, 13), Size = new Size(130, 35), FlatStyle = FlatStyle.Flat, BackColor = _sidebarActiveColor, ForeColor = Color.White, Cursor = Cursors.Hand };
+            btnAdd.FlatAppearance.BorderSize = 0;
+            var btnEdit = new Button { Text = "✏ Изменить", Font = new Font("Segoe UI", 10), Location = new Point(890, 13), Size = new Size(120, 35), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(236, 240, 241), ForeColor = _textDark, Cursor = Cursors.Hand, Enabled = false };
+            btnEdit.FlatAppearance.BorderSize = 0;
+            var btnDelete = new Button { Text = "🗑 Удалить", Font = new Font("Segoe UI", 10), Location = new Point(1020, 13), Size = new Size(120, 35), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(253, 237, 236), ForeColor = Color.FromArgb(231, 76, 60), Cursor = Cursors.Hand, Enabled = false };
+            btnDelete.FlatAppearance.BorderSize = 0;
+
+            topPanel.Controls.AddRange(new Control[] { lblTitle, btnAdd, btnEdit, btnDelete });
+
+            var tablePanel = new Panel { Dock = DockStyle.Top, Height = 220, BackColor = _contentColor, Padding = new Padding(20, 0, 20, 10) };
             var dataGridView = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Color.White, BorderStyle = BorderStyle.None, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, ReadOnly = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, Font = new Font("Segoe UI", 10) };
             dataGridView.EnableHeadersVisualStyles = false;
             dataGridView.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
@@ -1572,12 +1726,12 @@ namespace FinancialAnalyzer.Forms
 
             dataGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dataGridView.Columns.Add("colId", "#"); dataGridView.Columns["colId"].FillWeight = 5;
-            dataGridView.Columns.Add("colCategory", "Категория"); dataGridView.Columns["colCategory"].FillWeight = 20;
+            dataGridView.Columns.Add("colCategory", "Категория"); dataGridView.Columns["colCategory"].FillWeight = 18;
             dataGridView.Columns.Add("colName", "Название"); dataGridView.Columns["colName"].FillWeight = 25;
             dataGridView.Columns.Add("colAmount", "Сумма"); dataGridView.Columns["colAmount"].DefaultCellStyle.Format = "N0"; dataGridView.Columns["colAmount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight; dataGridView.Columns["colAmount"].FillWeight = 13;
             dataGridView.Columns.Add("colPeriod", "Период"); dataGridView.Columns["colPeriod"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter; dataGridView.Columns["colPeriod"].FillWeight = 13;
             dataGridView.Columns.Add("colMonthly", "В месяц"); dataGridView.Columns["colMonthly"].DefaultCellStyle.Format = "N0"; dataGridView.Columns["colMonthly"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight; dataGridView.Columns["colMonthly"].FillWeight = 13;
-            dataGridView.Columns.Add("colNote", "Примечание"); dataGridView.Columns["colNote"].FillWeight = 11;
+            dataGridView.Columns.Add("colNote", "Примечание"); dataGridView.Columns["colNote"].FillWeight = 13;
 
             foreach (var exp in expenses)
             {
@@ -1585,15 +1739,70 @@ namespace FinancialAnalyzer.Forms
                 dataGridView.Rows.Add(exp.Id, exp.CategoryText, exp.Name, exp.Amount, exp.PeriodText, exp.MonthlyAmount, exp.Note ?? "");
             }
 
-            dataGridView.Rows.Add("", "", "ИТОГО:", "", "", totalMonthly, "");
-            var totalRow = dataGridView.Rows[dataGridView.Rows.Count - 1];
-            totalRow.DefaultCellStyle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-            totalRow.DefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            if (expenses.Count > 0)
+            {
+                dataGridView.Rows.Add("", "", "ИТОГО:", "", "", totalMonthly, "");
+                var totalRow = dataGridView.Rows[dataGridView.Rows.Count - 1];
+                totalRow.DefaultCellStyle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                totalRow.DefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            }
+
+            dataGridView.CellClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.RowIndex < expenses.Count)
+                {
+                    selectedExpense = expenses[e.RowIndex];
+                    btnEdit.Enabled = true;
+                    btnDelete.Enabled = true;
+                }
+                else
+                {
+                    selectedExpense = null;
+                    btnEdit.Enabled = false;
+                    btnDelete.Enabled = false;
+                }
+            };
+
+            btnAdd.Click += (s, e) =>
+            {
+                using (var form = new ExpenseForm())
+                {
+                    if (form.ShowDialog() == DialogResult.OK)
+                    {
+                        Services.ExpenseService.Add(form.Result);
+                        ShowExpensesView();
+                    }
+                }
+            };
+
+            btnEdit.Click += (s, e) =>
+            {
+                if (selectedExpense != null)
+                {
+                    using (var form = new ExpenseForm(selectedExpense))
+                    {
+                        if (form.ShowDialog() == DialogResult.OK)
+                        {
+                            Services.ExpenseService.Update(form.Result);
+                            ShowExpensesView();
+                        }
+                    }
+                }
+            };
+
+            btnDelete.Click += (s, e) =>
+            {
+                if (selectedExpense != null && MessageBox.Show($"Удалить расход \"{selectedExpense.Name}\"?", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    Services.ExpenseService.Delete(selectedExpense.Id);
+                    ShowExpensesView();
+                }
+            };
 
             tablePanel.Controls.Add(dataGridView);
 
             var summaryPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(20) };
-            var lblSummary = new Label { Text = $"Общий расход: {totalMonthly:N0} ₽/мес ({totalMonthly * 12:N0} ₽/год)", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.FromArgb(231, 76, 60), Location = new Point(20, 20), Size = new Size(600, 35) };
+            var lblSummary = new Label { Text = $"Общий расход: {totalMonthly:N0} ₽/мес ({totalMonthly * 12:N0} ₽/год)", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.FromArgb(231, 76, 60), Location = new Point(20, 15), Size = new Size(600, 35) };
             summaryPanel.Controls.Add(lblSummary);
 
             _contentPanel.Controls.Add(summaryPanel);
@@ -1604,7 +1813,7 @@ namespace FinancialAnalyzer.Forms
         private void ShowCreditsView()
         {
             _contentPanel.Controls.Clear();
-            var credits = Services.CreditService.GetDemoCredits();
+            var credits = Services.CreditService.GetAll();
 
             // Верхняя панель
             var topPanel = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Color.White, Padding = new Padding(20, 12, 20, 10) };
@@ -1617,7 +1826,7 @@ namespace FinancialAnalyzer.Forms
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                     {
-                        MessageBox.Show($"Кредит \"{form.Result.Name}\" добавлен!\nПлатёж: {form.Result.MonthlyPayment:N0} ₽/мес", "Успешно", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Services.CreditService.Add(form.Result);
                         ShowCreditsView();
                     }
                 }
@@ -1711,7 +1920,8 @@ namespace FinancialAnalyzer.Forms
                 using (var form = new CreditForm(credit))
                 {
                     if (form.ShowDialog() == DialogResult.OK)
-                    { MessageBox.Show("Изменения сохранены!", "Успешно", MessageBoxButtons.OK, MessageBoxIcon.Information); ShowCreditsView(); }
+                    { Services.CreditService.Update(form.Result); }
+                    ShowCreditsView();
                 }
             };
             var btnDelete = new Button { Text = "🗑 Удалить", Font = new Font("Segoe UI", 10), Location = new Point(180, 230), Size = new Size(140, 35), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(253, 237, 236), ForeColor = Color.FromArgb(231, 76, 60), Cursor = Cursors.Hand };
@@ -1719,7 +1929,8 @@ namespace FinancialAnalyzer.Forms
             btnDelete.Click += (s, ev) =>
             {
                 if (MessageBox.Show($"Удалить кредит \"{credit.Name}\"?", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                { MessageBox.Show("Кредит удалён (демо).", "Успешно", MessageBoxButtons.OK, MessageBoxIcon.Information); ShowCreditsView(); }
+                { Services.CreditService.Delete(credit.Id); }
+                ShowCreditsView();
             };
 
             _creditDetailsPanel.Controls.AddRange(new Control[] { lblName, leftPanel, rightPanel, btnEdit, btnDelete });
@@ -1729,6 +1940,13 @@ namespace FinancialAnalyzer.Forms
         {
             _contentPanel.Controls.Clear();
 
+            // Загружаем текущие настройки из БД
+            var currentUser = Services.AuthService.CurrentUser;
+            if (currentUser != null)
+            {
+                _inflationRate = currentUser.InflationRate;
+            }
+
             // Переменные для доступа из кнопки сохранения
             RadioButton rbFormat1 = null;
             RadioButton rbFormat2 = null;
@@ -1736,6 +1954,7 @@ namespace FinancialAnalyzer.Forms
             RadioButton rbChangesValue = null;
             RadioButton rbChangesBoth = null;
             TextBox txtName = null;
+            TextBox txtInflation = null;
 
             // ==========================================
             // Заголовок
@@ -1778,7 +1997,7 @@ namespace FinancialAnalyzer.Forms
                 Size = new Size(200, 20)
             };
 
-            var txtInflation = new TextBox
+            txtInflation = new TextBox
             {
                 Text = _inflationRate.ToString("F1"),
                 Font = new Font("Segoe UI", 11),
@@ -1804,16 +2023,48 @@ namespace FinancialAnalyzer.Forms
                 }
             };
 
+            // Кнопка получения ключевой ставки из API ЦБ РФ
+            var btnGetRate = new Button
+            {
+                Text = "🌐 Ключевая ставка ЦБ",
+                Font = new Font("Segoe UI", 8),
+                Location = new Point(230, 55),
+                Size = new Size(150, 22),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(236, 240, 241),
+                ForeColor = _textDark,
+                Cursor = Cursors.Hand
+            };
+            btnGetRate.FlatAppearance.BorderSize = 1;
+            btnGetRate.FlatAppearance.BorderColor = Color.FromArgb(206, 212, 218);
+            btnGetRate.Click += (s, ev) =>
+            {
+                Cursor = Cursors.WaitCursor;
+                var rate = Services.MarketDataService.GetKeyRate();
+                if (rate.HasValue)
+                {
+                    txtInflation.Text = rate.Value.ToString("F1");
+                    lblInflationSaved.Text = "✅ Ключевая ставка загружена";
+                    lblInflationSaved.ForeColor = Color.FromArgb(46, 204, 113);
+                }
+                else
+                {
+                    lblInflationSaved.Text = "❌ API ЦБ РФ недоступен";
+                    lblInflationSaved.ForeColor = Color.FromArgb(231, 76, 60);
+                }
+                Cursor = Cursors.Default;
+            };
+
             var lblInflationHint = new Label
             {
-                Text = "Влияет на расчёт реальной стоимости резерва, прогнозы и доходность вкладов.",
+                Text = "Влияет на расчёт реальной стоимости резерва и прогнозы.",
                 Font = new Font("Segoe UI", 9),
                 ForeColor = Color.FromArgb(149, 165, 166),
                 Location = new Point(20, 60),
                 Size = new Size(800, 20)
             };
 
-            econGroup.Controls.AddRange(new Control[] { lblInflation, txtInflation, lblInflationSaved, lblInflationHint });
+            econGroup.Controls.AddRange(new Control[] { lblInflation, txtInflation, lblInflationSaved, btnGetRate, lblInflationHint });
 
             // ==========================================
             // Блок: Отображение
@@ -1844,7 +2095,7 @@ namespace FinancialAnalyzer.Forms
                 ForeColor = _textDark,
                 Location = new Point(0, 3),
                 Size = new Size(120, 25),
-                Checked = true
+                Checked = currentUser?.FormatType != "100000 руб."
             };
 
             rbFormat2 = new RadioButton
@@ -1853,7 +2104,8 @@ namespace FinancialAnalyzer.Forms
                 Font = new Font("Segoe UI", 10),
                 ForeColor = _textDark,
                 Location = new Point(130, 3),
-                Size = new Size(140, 25)
+                Size = new Size(140, 25),
+                Checked = currentUser?.FormatType == "100000 руб."
             };
 
             formatPanel.Controls.AddRange(new Control[] { rbFormat1, rbFormat2 });
@@ -1881,7 +2133,7 @@ namespace FinancialAnalyzer.Forms
                 ForeColor = _textDark,
                 Location = new Point(0, 3),
                 Size = new Size(130, 25),
-                Checked = true
+                Checked = currentUser?.ChangeDisplayType == "percent"
             };
 
             rbChangesValue = new RadioButton
@@ -1890,7 +2142,8 @@ namespace FinancialAnalyzer.Forms
                 Font = new Font("Segoe UI", 10),
                 ForeColor = _textDark,
                 Location = new Point(140, 3),
-                Size = new Size(120, 25)
+                Size = new Size(120, 25),
+                Checked = currentUser?.ChangeDisplayType == "amount"
             };
 
             rbChangesBoth = new RadioButton
@@ -1899,15 +2152,13 @@ namespace FinancialAnalyzer.Forms
                 Font = new Font("Segoe UI", 10),
                 ForeColor = _textDark,
                 Location = new Point(270, 3),
-                Size = new Size(80, 25)
+                Size = new Size(80, 25),
+                Checked = currentUser?.ChangeDisplayType == "both"
             };
 
             changesPanel.Controls.AddRange(new Control[] { rbChangesPercent, rbChangesValue, rbChangesBoth });
 
-            displayGroup.Controls.AddRange(new Control[] {
-        lblFormat, formatPanel,
-        lblChanges, changesPanel
-    });
+            displayGroup.Controls.AddRange(new Control[] { lblFormat, formatPanel, lblChanges, changesPanel });
 
             // ==========================================
             // Блок: Профиль
@@ -1915,7 +2166,7 @@ namespace FinancialAnalyzer.Forms
             var profileGroup = CreateGroupBox("Профиль пользователя", leftMargin, currentY, panelWidth, 130);
             currentY += 140;
 
-            var lblName = new Label
+            var lblNameLabel = new Label
             {
                 Text = "Имя:",
                 Font = new Font("Segoe UI", 11),
@@ -1926,7 +2177,7 @@ namespace FinancialAnalyzer.Forms
 
             txtName = new TextBox
             {
-                Text = "Зыкин Егор",
+                Text = currentUser?.DisplayName ?? "Пользователь",
                 Font = new Font("Segoe UI", 11),
                 Location = new Point(100, 25),
                 Size = new Size(250, 25),
@@ -1935,7 +2186,7 @@ namespace FinancialAnalyzer.Forms
                 ForeColor = _textDark
             };
 
-            var lblLogin = new Label
+            var lblLoginLabel = new Label
             {
                 Text = "Логин:",
                 Font = new Font("Segoe UI", 11),
@@ -1946,7 +2197,7 @@ namespace FinancialAnalyzer.Forms
 
             var txtLogin = new TextBox
             {
-                Text = "admin",
+                Text = currentUser?.Username ?? "admin",
                 Font = new Font("Segoe UI", 11),
                 Location = new Point(100, 60),
                 Size = new Size(250, 25),
@@ -1970,13 +2221,13 @@ namespace FinancialAnalyzer.Forms
             btnChangePassword.FlatAppearance.BorderSize = 0;
             btnChangePassword.Click += (s, e) =>
             {
-                MessageBox.Show("Смена пароля будет доступна после подключения базы данных.",
-                    "Информация", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                using (var form = new ChangePasswordForm())
+                {
+                    form.ShowDialog();
+                }
             };
 
-            profileGroup.Controls.AddRange(new Control[] {
-        lblName, txtName, lblLogin, txtLogin, btnChangePassword
-    });
+            profileGroup.Controls.AddRange(new Control[] { lblNameLabel, txtName, lblLoginLabel, txtLogin, btnChangePassword });
 
             // ==========================================
             // Блок: Данные
@@ -1998,16 +2249,18 @@ namespace FinancialAnalyzer.Forms
             btnReset.FlatAppearance.BorderSize = 0;
             btnReset.Click += (s, e) =>
             {
-                var result = MessageBox.Show(
-                    "Вы уверены? Все данные будут удалены безвозвратно.",
-                    "Подтверждение сброса",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-
+                var result = MessageBox.Show("Вы уверены? Все данные будут удалены безвозвратно.", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (result == DialogResult.Yes)
                 {
-                    MessageBox.Show("Данные сброшены.", "Готово",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Очистка всех таблиц
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Deposits");
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Assets");
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Reserves");
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Incomes");
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Expenses");
+                    Data.Repository.ExecuteNonQuery("DELETE FROM Credits");
+                    MessageBox.Show("Все данные удалены.", "Готово", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    ShowDashboard();
                 }
             };
 
@@ -2025,14 +2278,13 @@ namespace FinancialAnalyzer.Forms
             btnExport.FlatAppearance.BorderSize = 0;
             btnExport.Click += (s, e) =>
             {
-                MessageBox.Show("Экспорт будет реализован позже (дополнительный модуль для ВКР).",
-                    "Информация", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Services.ExportService.ExportAllData();
             };
 
             dataGroup.Controls.AddRange(new Control[] { btnReset, btnExport });
 
             // ==========================================
-            // Кнопка сохранения настроек
+            // Кнопка сохранения
             // ==========================================
             var btnSaveSettings = new Button
             {
@@ -2048,18 +2300,40 @@ namespace FinancialAnalyzer.Forms
             btnSaveSettings.FlatAppearance.BorderSize = 0;
             btnSaveSettings.Click += (s, e) =>
             {
-                string formatText = rbFormat1.Checked ? "100 000 ₽" : "100000 руб.";
-                string changesText = rbChangesPercent.Checked ? "Проценты" : rbChangesValue.Checked ? "Сумма (₽)" : "Оба";
+                string formatType = rbFormat1.Checked ? "100 000 ₽" : "100000 руб.";
+                string changeType = rbChangesPercent.Checked ? "percent" : (rbChangesValue.Checked ? "amount" : "both");
+                string displayName = txtName.Text.Trim();
+                decimal inflation = _inflationRate;
 
-                MessageBox.Show(
-                    "Настройки сохранены!\n\n" +
-                    $"Инфляция: {_inflationRate:F1}%\n" +
-                    $"Формат сумм: {formatText}\n" +
-                    $"Изменения на главной: {changesText}\n" +
-                    $"Имя: {txtName.Text}",
-                    "Настройки сохранены",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                // Сохраняем в БД
+                Data.Repository.ExecuteNonQuery(
+                    "UPDATE Users SET DisplayName=@d, InflationRate=@i, FormatType=@f, ChangeDisplayType=@c WHERE Id=@id",
+                    ("@id", currentUser?.Id ?? 1),
+                    ("@d", displayName),
+                    ("@i", inflation),
+                    ("@f", formatType),
+                    ("@c", changeType));
+
+                // Обновляем текущего пользователя
+                if (currentUser != null)
+                {
+                    currentUser.DisplayName = displayName;
+                    currentUser.InflationRate = inflation;
+                    currentUser.FormatType = formatType;
+                    currentUser.ChangeDisplayType = changeType;
+                }
+
+                // Обновляем имя в шапке
+                foreach (Control c in _headerPanel.Controls)
+                {
+                    if (c is Label lbl && lbl.Text.StartsWith("👤"))
+                    {
+                        lbl.Text = $"👤 {displayName}";
+                        break;
+                    }
+                }
+
+                MessageBox.Show("Настройки сохранены!", "Успешно", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             _contentPanel.Controls.Add(btnSaveSettings);
             currentY += 60;
@@ -2103,6 +2377,45 @@ namespace FinancialAnalyzer.Forms
         {
             _contentPanel.Controls.Clear();
 
+            // Получаем реальные данные из БД
+            var deposits = Services.DepositService.GetAll();
+            var stocks = Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Stock);
+            var currencies = Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Currency);
+            var metals = Services.AssetService.GetByType(AssetModel.AssetTypeEnum.Metal);
+            var reserves = Services.ReserveService.GetAll();
+            var credits = Services.CreditService.GetAll();
+            var incomes = Services.IncomeService.GetAll();
+            var expenses = Services.ExpenseService.GetAll();
+
+            // Вычисляем итоги
+            decimal depositsTotal = deposits.Sum(d => d.CurrentAmount);
+            decimal depositsChange = deposits.Sum(d => d.ProfitPercent * d.CurrentAmount) / (depositsTotal > 0 ? depositsTotal : 1);
+
+            decimal stocksTotal = stocks.Sum(s => s.CurrentTotalValue);
+            decimal stocksChange = stocks.Count > 0 ? stocks.Average(s => s.ProfitPercent) : 0;
+
+            decimal currenciesTotal = currencies.Sum(c => c.CurrentTotalValue);
+            decimal currenciesChange = currencies.Count > 0 ? currencies.Average(c => c.ProfitPercent) : 0;
+
+            decimal metalsTotal = metals.Sum(m => m.CurrentTotalValue);
+            decimal metalsChange = metals.Count > 0 ? metals.Average(m => m.ProfitPercent) : 0;
+
+            decimal reservesTotal = reserves.Sum(r => r.Amount);
+            decimal reservesChange = reserves.Count > 0 ? -reserves.Average(r => r.LossPercent) : 0; // всегда отрицательный
+
+            decimal creditMonthly = credits.Sum(c => c.MonthlyPayment);
+            decimal incomeMonthly = incomes.Sum(i => i.MonthlyAmount);
+            decimal expenseMonthly = expenses.Sum(e => e.MonthlyAmount);
+            int creditLoadPercent = incomeMonthly > 0 ? (int)(creditMonthly / incomeMonthly * 100) : 0;
+
+            // Прогноз на год вперёд
+            decimal currentBalance = depositsTotal + stocksTotal + currenciesTotal + metalsTotal + reservesTotal;
+            decimal monthlyNetFlow = incomeMonthly - expenseMonthly - creditMonthly;
+            decimal forecastBalance = currentBalance + monthlyNetFlow * 12;
+
+            // ==========================================
+            // Панель прогноза
+            // ==========================================
             var forecastPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -2114,11 +2427,10 @@ namespace FinancialAnalyzer.Forms
             var lblForecastLabel = new Label
             {
                 Text = "Прогноз на дату:",
-                Font = new Font("Segoe UI", 11, FontStyle.Regular),
+                Font = new Font("Segoe UI", 11),
                 ForeColor = _textDark,
                 Location = new Point(20, 20),
-                Size = new Size(130, 25),
-                TextAlign = ContentAlignment.MiddleLeft
+                Size = new Size(130, 25)
             };
 
             var dtpForecast = new DateTimePicker
@@ -2142,20 +2454,66 @@ namespace FinancialAnalyzer.Forms
                 Cursor = Cursors.Hand
             };
             btnCalculate.FlatAppearance.BorderSize = 0;
-            btnCalculate.Click += (s, e) =>
+            btnCalculate.Click += (s, ev) =>
             {
+                int months = Math.Max(1, (dtpForecast.Value.Year - DateTime.Now.Year) * 12 + dtpForecast.Value.Month - DateTime.Now.Month);
+
+                decimal fBalance = currentBalance;
+                var activeCreditsCopy = new List<(CreditModel credit, int monthsLeft)>();
+                foreach (var c in credits)
+                    activeCreditsCopy.Add((c, c.MonthsLeft));
+
+                for (int m = 1; m <= months; m++)
+                {
+                    fBalance += incomeMonthly - expenseMonthly;
+
+                    foreach (var dep in deposits)
+                    {
+                        decimal monthlyRate = dep.InterestRate / 100m / 12m;
+                        if (dep.RateType == 1)
+                            fBalance += fBalance * monthlyRate;
+                        else
+                            fBalance += dep.InitialAmount * monthlyRate;
+                    }
+
+                    foreach (var st in stocks)
+                        fBalance += st.CurrentTotalValue * st.AvgMonthlyGrowthPercent / 100m;
+
+                    foreach (var cur in currencies)
+                        fBalance += cur.CurrentTotalValue * cur.AvgMonthlyGrowthPercent / 100m;
+
+                    foreach (var met in metals)
+                        fBalance += met.CurrentTotalValue * met.AvgMonthlyGrowthPercent / 100m;
+
+                    for (int i = activeCreditsCopy.Count - 1; i >= 0; i--)
+                    {
+                        var (credit, left) = activeCreditsCopy[i];
+                        if (left > 0)
+                        {
+                            fBalance -= credit.MonthlyPayment;
+                            activeCreditsCopy[i] = (credit, left - 1);
+                        }
+                    }
+                }
+
+                double inflationFactor = Math.Pow(1 + (double)_inflationRate / 100.0, months / 12.0);
+                decimal realForecast = fBalance / (decimal)inflationFactor;
+
                 MessageBox.Show(
-                    $"Прогноз на {dtpForecast.Value.ToShortDateString()}\n\n" +
-                    "Расчёт будет доступен после добавления данных.",
+                    $"Прогноз на {dtpForecast.Value.ToShortDateString()}:\n\n" +
+                    $"Номинальный баланс: {fBalance:N0} ₽\n" +
+                    $"С учётом инфляции ({_inflationRate}%): {realForecast:N0} ₽\n" +
+                    $"Месяцев прогноза: {months}",
                     "Прогноз",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             };
 
-            forecastPanel.Controls.AddRange(new Control[] {
-            lblForecastLabel, dtpForecast, btnCalculate
-            });
+            forecastPanel.Controls.AddRange(new Control[] { lblForecastLabel, dtpForecast, btnCalculate });
 
+            // ==========================================
+            // Карточки активов
+            // ==========================================
             var cardsPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -2166,12 +2524,12 @@ namespace FinancialAnalyzer.Forms
 
             var cardsData = new[]
             {
-                new { Title = "Вклады", Value = "560 000 ₽", Change = "7.4%", IsPositive = true, Color = Color.FromArgb(46, 204, 113) },
-                new { Title = "Акции", Value = "340 000 ₽", Change = "12.3%", IsPositive = true, Color = Color.FromArgb(46, 204, 113) },
-                new { Title = "Валюты", Value = "210 000 ₽", Change = "3.1%", IsPositive = false, Color = Color.FromArgb(231, 76, 60) },
-                new { Title = "Металлы", Value = "90 000 ₽", Change = "5.8%", IsPositive = true, Color = Color.FromArgb(46, 204, 113) },
-                new { Title = "Резерв", Value = "120 000 ₽", Change = "8.0%", IsPositive = false, Color = Color.FromArgb(231, 76, 60) },
-                new { Title = "Кредиты", Value = "−56 000 ₽/мес", Change = "41% нагр.", IsPositive = false, Color = Color.FromArgb(231, 76, 60) }
+                new { Title = "Вклады", Value = FormatAmount(depositsTotal), Change = $"{depositsChange:F1}%", IsPos = depositsChange >= 0, Color = depositsChange >= 0 ? Color.FromArgb(46, 204, 113) : Color.FromArgb(231, 76, 60) },
+                new { Title = "Акции", Value = FormatAmount(stocksTotal), Change = $"{stocksChange:F1}%", IsPos = stocksChange >= 0, Color = stocksChange >= 0 ? Color.FromArgb(46, 204, 113) : Color.FromArgb(231, 76, 60) },
+                new { Title = "Валюты", Value = FormatAmount(currenciesTotal), Change = $"{currenciesChange:F1}%", IsPos = currenciesChange >= 0, Color = currenciesChange >= 0 ? Color.FromArgb(46, 204, 113) : Color.FromArgb(231, 76, 60) },
+                new { Title = "Металлы", Value = FormatAmount(metalsTotal), Change = $"{metalsChange:F1}%", IsPos = metalsChange >= 0, Color = metalsChange >= 0 ? Color.FromArgb(46, 204, 113) : Color.FromArgb(231, 76, 60) },
+                new { Title = "Резерв", Value = FormatAmount(reservesTotal), Change = $"{reservesChange:F1}%", IsPos = false, Color = Color.FromArgb(231, 76, 60) },
+                new { Title = "Кредиты", Value = $"-{FormatAmount(creditMonthly)}/мес", Change = $"{creditLoadPercent}% нагр.", IsPos = false, Color = creditLoadPercent > 50 ? Color.FromArgb(231, 76, 60) : Color.FromArgb(243, 156, 18) }
             };
 
             int cardWidth = 170;
@@ -2185,15 +2543,17 @@ namespace FinancialAnalyzer.Forms
                     cardsData[i].Title,
                     cardsData[i].Value,
                     cardsData[i].Change,
-                    cardsData[i].IsPositive,
+                    cardsData[i].IsPos,
                     cardsData[i].Color,
                     cardWidth,
                     cardHeight);
-
                 card.Location = new Point(startX + (cardWidth + spacing) * i, 10);
                 cardsPanel.Controls.Add(card);
             }
 
+            // ==========================================
+            // Итоговые блоки
+            // ==========================================
             var summaryPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -2202,7 +2562,6 @@ namespace FinancialAnalyzer.Forms
                 Padding = new Padding(20, 10, 20, 10)
             };
 
-            // Блок "Общий баланс"
             var balanceBox = new Panel
             {
                 Size = new Size(350, 95),
@@ -2210,28 +2569,10 @@ namespace FinancialAnalyzer.Forms
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
-
-            var lblBalanceTitle = new Label
-            {
-                Text = "💰 Общий баланс",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                ForeColor = _textDark,
-                Location = new Point(15, 10),
-                Size = new Size(320, 25)
-            };
-
-            var lblBalanceValue = new Label
-            {
-                Text = "1 320 000 ₽",
-                Font = new Font("Segoe UI", 24, FontStyle.Bold),
-                ForeColor = Color.FromArgb(46, 204, 113),
-                Location = new Point(15, 40),
-                Size = new Size(320, 40)
-            };
-
+            var lblBalanceTitle = new Label { Text = "💰 Общий баланс", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
+            var lblBalanceValue = new Label { Text = FormatAmount(currentBalance), Font = new Font("Segoe UI", 24, FontStyle.Bold), ForeColor = Color.FromArgb(46, 204, 113), Location = new Point(15, 40), Size = new Size(320, 40) };
             balanceBox.Controls.AddRange(new Control[] { lblBalanceTitle, lblBalanceValue });
 
-            // Блок "Прогноз"
             var forecastBox = new Panel
             {
                 Size = new Size(350, 95),
@@ -2239,28 +2580,10 @@ namespace FinancialAnalyzer.Forms
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
-
-            var lblForecastTitle = new Label
-            {
-                Text = "📈 Прогноз (реальный)",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                ForeColor = _textDark,
-                Location = new Point(15, 10),
-                Size = new Size(320, 25)
-            };
-
-            var lblForecastValue = new Label
-            {
-                Text = "1 450 000 ₽",
-                Font = new Font("Segoe UI", 24, FontStyle.Bold),
-                ForeColor = _sidebarActiveColor,
-                Location = new Point(15, 40),
-                Size = new Size(320, 40)
-            };
-
+            var lblForecastTitle = new Label { Text = "📈 Прогноз (год)", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
+            var lblForecastValue = new Label { Text = FormatAmount(forecastBalance), Font = new Font("Segoe UI", 24, FontStyle.Bold), ForeColor = _sidebarActiveColor, Location = new Point(15, 40), Size = new Size(320, 40) };
             forecastBox.Controls.AddRange(new Control[] { lblForecastTitle, lblForecastValue });
 
-            // Блок "Кредитная нагрузка"
             var creditBox = new Panel
             {
                 Size = new Size(350, 95),
@@ -2268,47 +2591,162 @@ namespace FinancialAnalyzer.Forms
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
-
-            var lblCreditTitle = new Label
-            {
-                Text = "🏠 Кредитная нагрузка",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                ForeColor = _textDark,
-                Location = new Point(15, 10),
-                Size = new Size(320, 25)
-            };
-
-            var lblCreditValue = new Label
-            {
-                Text = "56 000 ₽/мес (41%)",
-                Font = new Font("Segoe UI", 18, FontStyle.Bold),
-                ForeColor = Color.FromArgb(243, 156, 18),  // жёлтый — повышенная нагрузка
-                Location = new Point(15, 45),
-                Size = new Size(320, 35)
-            };
-
+            var creditColor = creditLoadPercent > 50 ? Color.FromArgb(231, 76, 60) : (creditLoadPercent > 30 ? Color.FromArgb(243, 156, 18) : Color.FromArgb(46, 204, 113));
+            var lblCreditTitle = new Label { Text = "🏠 Кредитная нагрузка", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
+            var lblCreditValue = new Label { Text = $"{FormatAmount(creditMonthly)}/мес ({creditLoadPercent}%)", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = creditColor, Location = new Point(15, 45), Size = new Size(320, 35) };
             creditBox.Controls.AddRange(new Control[] { lblCreditTitle, lblCreditValue });
 
             summaryPanel.Controls.AddRange(new Control[] { balanceBox, forecastBox, creditBox });
 
+            // ==========================================
+            // График прогноза (помесячный)
+            // ==========================================
             var chartPanel = new Panel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                Height = 300,
                 BackColor = Color.White,
-                Padding = new Padding(20)
+                Padding = new Padding(10)
             };
 
-            var lblChartPlaceholder = new Label
+            var chart = new System.Windows.Forms.DataVisualization.Charting.Chart
             {
-                Text = "📊 График прогноза\n\nЗдесь будет отображаться график роста капитала\nс учётом доходов, расходов и кредитов.",
-                Font = new Font("Segoe UI", 14),
-                ForeColor = Color.FromArgb(149, 165, 166),
                 Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleCenter
+                BackColor = Color.White
             };
 
-            chartPanel.Controls.Add(lblChartPlaceholder);
+            var chartArea = new System.Windows.Forms.DataVisualization.Charting.ChartArea("MainArea")
+            {
+                BackColor = Color.White
+            };
+            chartArea.AxisX.Title = "Дата";
+            chartArea.AxisX.TitleFont = new Font("Segoe UI", 9);
+            chartArea.AxisX.LabelStyle.Format = "MM.yyyy";
+            chartArea.AxisX.IntervalType = System.Windows.Forms.DataVisualization.Charting.DateTimeIntervalType.Months;
+            chartArea.AxisX.Interval = 3;
+            chartArea.AxisY.Title = "Баланс (₽)";
+            chartArea.AxisY.TitleFont = new Font("Segoe UI", 9);
+            chartArea.AxisY.LabelStyle.Format = "N0";
+            chart.ChartAreas.Add(chartArea);
 
+            var nominalSeries = new System.Windows.Forms.DataVisualization.Charting.Series("Номинал")
+            {
+                ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line,
+                Color = Color.FromArgb(46, 204, 113),
+                BorderWidth = 2,
+                XValueType = System.Windows.Forms.DataVisualization.Charting.ChartValueType.DateTime
+            };
+            chart.Series.Add(nominalSeries);
+
+            var realSeries = new System.Windows.Forms.DataVisualization.Charting.Series("С инфляцией")
+            {
+                ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line,
+                Color = Color.FromArgb(243, 156, 18),
+                BorderWidth = 2,
+                BorderDashStyle = System.Windows.Forms.DataVisualization.Charting.ChartDashStyle.Dash,
+                XValueType = System.Windows.Forms.DataVisualization.Charting.ChartValueType.DateTime
+            };
+            chart.Series.Add(realSeries);
+
+            // Находим самую раннюю дату из всех активов
+            DateTime startDate = DateTime.Now;
+            if (deposits.Count > 0) startDate = deposits.Min(d => d.OpenDate);
+            if (stocks.Count > 0) startDate = new[] { startDate, stocks.Min(s => s.PurchaseDate) }.Min();
+            if (currencies.Count > 0) startDate = new[] { startDate, currencies.Min(c => c.PurchaseDate) }.Min();
+            if (metals.Count > 0) startDate = new[] { startDate, metals.Min(m => m.PurchaseDate) }.Min();
+            if (reserves.Count > 0) startDate = new[] { startDate, reserves.Min(r => r.CreatedAt) }.Min();
+
+            DateTime endDate = DateTime.Now.AddMonths(24);
+
+            // Копируем кредиты в список для отслеживания погашения
+            var activeCredits = new List<(CreditModel credit, int monthsLeft)>();
+            foreach (var c in credits)
+                activeCredits.Add((c, c.MonthsLeft));
+
+            // Помесячный прогноз
+            decimal balance = currentBalance;
+            int totalMonths = (endDate.Year - startDate.Year) * 12 + endDate.Month - startDate.Month;
+
+            for (int month = 0; month <= totalMonths; month++)
+            {
+                DateTime currentDate = startDate.AddMonths(month);
+
+                if (month > 0)
+                {
+                    // Доходы
+                    balance += incomeMonthly;
+
+                    // Расходы
+                    balance -= expenseMonthly;
+
+                    // Проценты по вкладам
+                    foreach (var dep in deposits)
+                    {
+                        decimal monthlyRate = dep.InterestRate / 100m / 12m;
+                        if (dep.RateType == 1) // сложный
+                            balance += balance * monthlyRate;
+                        else // простой
+                            balance += dep.InitialAmount * monthlyRate;
+                    }
+
+                    // Рост акций (среднемесячный)
+                    foreach (var st in stocks)
+                        balance += st.CurrentTotalValue * st.AvgMonthlyGrowthPercent / 100m;
+
+                    // Рост валют
+                    foreach (var cur in currencies)
+                        balance += cur.CurrentTotalValue * cur.AvgMonthlyGrowthPercent / 100m;
+
+                    // Рост металлов
+                    foreach (var met in metals)
+                        balance += met.CurrentTotalValue * met.AvgMonthlyGrowthPercent / 100m;
+
+                    // Кредиты (с проверкой погашения)
+                    for (int i = activeCredits.Count - 1; i >= 0; i--)
+                    {
+                        var (credit, monthsLeft) = activeCredits[i];
+                        if (monthsLeft > 0)
+                        {
+                            balance -= credit.MonthlyPayment;
+                            activeCredits[i] = (credit, monthsLeft - 1);
+                        }
+                    }
+
+                    // Инфляция не вычитается из номинала — только для реального
+                }
+
+                double inflationFactor = Math.Pow(1 + (double)_inflationRate / 100.0, month / 12.0);
+                decimal realValue = balance / (decimal)inflationFactor;
+
+                nominalSeries.Points.AddXY(currentDate, (double)balance);
+                realSeries.Points.AddXY(currentDate, (double)realValue);
+            }
+
+            // Вертикальная линия — сегодня
+            var todayLine = new System.Windows.Forms.DataVisualization.Charting.StripLine
+            {
+                IntervalOffset = DateTime.Now.ToOADate(),
+                StripWidth = 1,
+                BackColor = Color.FromArgb(52, 73, 94),
+                BorderColor = Color.FromArgb(52, 73, 94),
+                BorderWidth = 2,
+                Text = "Сегодня",
+                TextAlignment = StringAlignment.Near,
+                TextOrientation = System.Windows.Forms.DataVisualization.Charting.TextOrientation.Rotated270,
+                Font = new Font("Segoe UI", 8, FontStyle.Bold)
+            };
+            chartArea.AxisX.StripLines.Add(todayLine);
+
+            var legend = new System.Windows.Forms.DataVisualization.Charting.Legend
+            {
+                Docking = System.Windows.Forms.DataVisualization.Charting.Docking.Bottom,
+                Font = new Font("Segoe UI", 9)
+            };
+            chart.Legends.Add(legend);
+
+            chartPanel.Controls.Add(chart);
+
+            // Сборка
             _contentPanel.Controls.Add(chartPanel);
             _contentPanel.Controls.Add(summaryPanel);
             _contentPanel.Controls.Add(cardsPanel);
@@ -2400,7 +2838,7 @@ namespace FinancialAnalyzer.Forms
             // 
             // MainForm
             // 
-            this.ClientSize = new System.Drawing.Size(1366, 834);
+            this.ClientSize = new System.Drawing.Size(1399, 834);
             this.MinimumSize = new System.Drawing.Size(1000, 600);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
@@ -2411,6 +2849,15 @@ namespace FinancialAnalyzer.Forms
         private void MainForm_Load(object sender, EventArgs e)
         {
 
+        }
+
+        /// Форматирует сумму согласно настройкам пользователя
+        private string FormatAmount(decimal amount)
+        {
+            var user = Services.AuthService.CurrentUser;
+            if (user != null && user.FormatType == "100000 руб.")
+                return $"{amount:N0} руб.";
+            return $"{amount:N0} ₽";
         }
     }
 }

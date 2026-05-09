@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Windows.Forms;
+using FinancialAnalyzer.Data;
 using FinancialAnalyzer.Forms;
 
 namespace FinancialAnalyzer
@@ -12,17 +13,18 @@ namespace FinancialAnalyzer
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // Инициализация базы данных
+            DatabaseHelper.Initialize();
+
             // Показываем форму входа
             using (var loginForm = new LoginForm())
             {
                 if (loginForm.ShowDialog() == DialogResult.OK)
                 {
-                    // Успешный вход — запускаем главную форму
                     Application.Run(new MainForm());
                 }
                 else
                 {
-                    // Пользователь закрыл форму входа — выходим
                     Application.Exit();
                 }
             }
