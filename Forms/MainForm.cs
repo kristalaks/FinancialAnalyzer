@@ -2411,7 +2411,48 @@ namespace FinancialAnalyzer.Forms
             // Прогноз на год вперёд
             decimal currentBalance = depositsTotal + stocksTotal + currenciesTotal + metalsTotal + reservesTotal;
             decimal monthlyNetFlow = incomeMonthly - expenseMonthly - creditMonthly;
-            decimal forecastBalance = currentBalance + monthlyNetFlow * 12;
+            // Помесячный прогноз на 12 месяцев (аналогично кнопке "Рассчитать")
+            decimal forecastBalance = currentBalance;
+            var forecastCredits = new List<(CreditModel credit, int monthsLeft)>();
+            foreach (var c in credits)
+                forecastCredits.Add((c, c.MonthsLeft));
+
+            for (int m = 1; m <= 12; m++)
+            {
+                // Доходы и расходы с индексацией
+                decimal indexedIncome = incomeMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, m);
+                decimal indexedExpense = expenseMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, m);
+                forecastBalance += indexedIncome - indexedExpense;
+
+                // Проценты по вкладам
+                foreach (var dep in deposits)
+                {
+                    decimal monthlyRate = dep.InterestRate / 100m / 12m;
+                    if (dep.RateType == 1)
+                        forecastBalance += forecastBalance * monthlyRate;
+                    else
+                        forecastBalance += dep.InitialAmount * monthlyRate;
+                }
+
+                // Рост активов
+                foreach (var st in stocks)
+                    forecastBalance += st.CurrentTotalValue * st.AvgMonthlyGrowthPercent / 100m;
+                foreach (var cur in currencies)
+                    forecastBalance += cur.CurrentTotalValue * cur.AvgMonthlyGrowthPercent / 100m;
+                foreach (var met in metals)
+                    forecastBalance += met.CurrentTotalValue * met.AvgMonthlyGrowthPercent / 100m;
+
+                // Кредитные платежи
+                for (int i = forecastCredits.Count - 1; i >= 0; i--)
+                {
+                    var (credit, left) = forecastCredits[i];
+                    if (left > 0)
+                    {
+                        forecastBalance -= credit.MonthlyPayment;
+                        forecastCredits[i] = (credit, left - 1);
+                    }
+                }
+            }
 
             // ==========================================
             // Панель прогноза
@@ -2465,7 +2506,9 @@ namespace FinancialAnalyzer.Forms
 
                 for (int m = 1; m <= months; m++)
                 {
-                    fBalance += incomeMonthly - expenseMonthly;
+                    decimal indexedIncome = incomeMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, m);
+                    decimal indexedExpense = expenseMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, m);
+                    fBalance += indexedIncome - indexedExpense;
 
                     foreach (var dep in deposits)
                     {
@@ -2562,44 +2605,110 @@ namespace FinancialAnalyzer.Forms
                 Padding = new Padding(20, 10, 20, 10)
             };
 
+            // Блок 1: Общий баланс
             var balanceBox = new Panel
             {
-                Size = new Size(350, 95),
+                Size = new Size(280, 95),
                 Location = new Point(20, 10),
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
-            var lblBalanceTitle = new Label { Text = "💰 Общий баланс", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
-            var lblBalanceValue = new Label { Text = FormatAmount(currentBalance), Font = new Font("Segoe UI", 24, FontStyle.Bold), ForeColor = Color.FromArgb(46, 204, 113), Location = new Point(15, 40), Size = new Size(320, 40) };
+            var lblBalanceTitle = new Label { Text = "💰 Общий баланс", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(250, 25) };
+            var lblBalanceValue = new Label { Text = FormatAmount(currentBalance), Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = Color.FromArgb(46, 204, 113), Location = new Point(15, 40), Size = new Size(250, 40) };
             balanceBox.Controls.AddRange(new Control[] { lblBalanceTitle, lblBalanceValue });
 
+            // Блок 2: Прогноз (год)
             var forecastBox = new Panel
             {
-                Size = new Size(350, 95),
-                Location = new Point(390, 10),
+                Size = new Size(280, 95),
+                Location = new Point(315, 10),
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
-            var lblForecastTitle = new Label { Text = "📈 Прогноз (год)", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
-            var lblForecastValue = new Label { Text = FormatAmount(forecastBalance), Font = new Font("Segoe UI", 24, FontStyle.Bold), ForeColor = _sidebarActiveColor, Location = new Point(15, 40), Size = new Size(320, 40) };
+            var lblForecastTitle = new Label { Text = "📈 Прогноз (год)", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(250, 25) };
+            var lblForecastValue = new Label { Text = FormatAmount(forecastBalance), Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = _sidebarActiveColor, Location = new Point(15, 40), Size = new Size(250, 40) };
             forecastBox.Controls.AddRange(new Control[] { lblForecastTitle, lblForecastValue });
 
+            // Блок 3: Кредитная нагрузка
             var creditBox = new Panel
             {
-                Size = new Size(350, 95),
-                Location = new Point(760, 10),
+                Size = new Size(280, 95),
+                Location = new Point(610, 10),
                 BackColor = Color.White,
                 Padding = new Padding(15)
             };
             var creditColor = creditLoadPercent > 50 ? Color.FromArgb(231, 76, 60) : (creditLoadPercent > 30 ? Color.FromArgb(243, 156, 18) : Color.FromArgb(46, 204, 113));
-            var lblCreditTitle = new Label { Text = "🏠 Кредитная нагрузка", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(320, 25) };
-            var lblCreditValue = new Label { Text = $"{FormatAmount(creditMonthly)}/мес ({creditLoadPercent}%)", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = creditColor, Location = new Point(15, 45), Size = new Size(320, 35) };
+            var lblCreditTitle = new Label { Text = "🏠 Кредитная нагрузка", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(250, 25) };
+            var lblCreditValue = new Label { Text = $"{FormatAmount(creditMonthly)}/мес ({creditLoadPercent}%)", Font = new Font("Segoe UI", 16, FontStyle.Bold), ForeColor = creditColor, Location = new Point(15, 45), Size = new Size(250, 35) };
             creditBox.Controls.AddRange(new Control[] { lblCreditTitle, lblCreditValue });
 
-            summaryPanel.Controls.AddRange(new Control[] { balanceBox, forecastBox, creditBox });
+            // Блок 4: Общая нагрузка
+            decimal totalLoad = expenseMonthly + creditMonthly;
+            int totalLoadPercent = incomeMonthly > 0 ? (int)(totalLoad / incomeMonthly * 100) : 0;
+            var totalLoadColor = totalLoadPercent > 80 ? Color.FromArgb(231, 76, 60) : (totalLoadPercent > 50 ? Color.FromArgb(243, 156, 18) : Color.FromArgb(46, 204, 113));
+
+            var totalLoadBox = new Panel
+            {
+                Size = new Size(280, 95),
+                Location = new Point(905, 10),
+                BackColor = Color.White,
+                Padding = new Padding(15)
+            };
+            var lblTotalLoadTitle = new Label { Text = "📊 Общая нагрузка", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = _textDark, Location = new Point(15, 10), Size = new Size(250, 25) };
+            var lblTotalLoadValue = new Label { Text = $"{FormatAmount(totalLoad)}/мес ({totalLoadPercent}%)", Font = new Font("Segoe UI", 16, FontStyle.Bold), ForeColor = totalLoadColor, Location = new Point(15, 45), Size = new Size(250, 35) };
+            totalLoadBox.Controls.AddRange(new Control[] { lblTotalLoadTitle, lblTotalLoadValue });
+
+            summaryPanel.Controls.AddRange(new Control[] { balanceBox, forecastBox, creditBox, totalLoadBox });
+
+            // Панель выбора горизонта прогноза
+            var forecastHorizonPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 40,
+                BackColor = Color.White,
+                Padding = new Padding(20, 5, 20, 5)
+            };
+
+            var lblHorizon = new Label
+            {
+                Text = "Горизонт прогноза (мес.):",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = _textDark,
+                Location = new Point(20, 8),
+                Size = new Size(170, 25)
+            };
+
+            var txtHorizon = new TextBox
+            {
+                Text = "24",
+                Font = new Font("Segoe UI", 10),
+                Location = new Point(195, 8),
+                Size = new Size(60, 25),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(248, 249, 250),
+                ForeColor = _textDark,
+                TextAlign = HorizontalAlignment.Center
+            };
+
+            var btnApplyHorizon = new Button
+            {
+                Text = "Применить",
+                Font = new Font("Segoe UI", 9),
+                Location = new Point(265, 8),
+                Size = new Size(100, 25),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = _sidebarActiveColor,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            btnApplyHorizon.FlatAppearance.BorderSize = 0;
+
+            forecastHorizonPanel.Controls.Add(lblHorizon);
+            forecastHorizonPanel.Controls.Add(txtHorizon);
+            forecastHorizonPanel.Controls.Add(btnApplyHorizon);
 
             // ==========================================
-            // График прогноза (помесячный)
+            // График прогноза (помесячный, с выбором горизонта)
             // ==========================================
             var chartPanel = new Panel
             {
@@ -2648,95 +2757,6 @@ namespace FinancialAnalyzer.Forms
             };
             chart.Series.Add(realSeries);
 
-            // Находим самую раннюю дату из всех активов
-            DateTime startDate = DateTime.Now;
-            if (deposits.Count > 0) startDate = deposits.Min(d => d.OpenDate);
-            if (stocks.Count > 0) startDate = new[] { startDate, stocks.Min(s => s.PurchaseDate) }.Min();
-            if (currencies.Count > 0) startDate = new[] { startDate, currencies.Min(c => c.PurchaseDate) }.Min();
-            if (metals.Count > 0) startDate = new[] { startDate, metals.Min(m => m.PurchaseDate) }.Min();
-            if (reserves.Count > 0) startDate = new[] { startDate, reserves.Min(r => r.CreatedAt) }.Min();
-
-            DateTime endDate = DateTime.Now.AddMonths(24);
-
-            // Копируем кредиты в список для отслеживания погашения
-            var activeCredits = new List<(CreditModel credit, int monthsLeft)>();
-            foreach (var c in credits)
-                activeCredits.Add((c, c.MonthsLeft));
-
-            // Помесячный прогноз
-            decimal balance = currentBalance;
-            int totalMonths = (endDate.Year - startDate.Year) * 12 + endDate.Month - startDate.Month;
-
-            for (int month = 0; month <= totalMonths; month++)
-            {
-                DateTime currentDate = startDate.AddMonths(month);
-
-                if (month > 0)
-                {
-                    // Доходы
-                    balance += incomeMonthly;
-
-                    // Расходы
-                    balance -= expenseMonthly;
-
-                    // Проценты по вкладам
-                    foreach (var dep in deposits)
-                    {
-                        decimal monthlyRate = dep.InterestRate / 100m / 12m;
-                        if (dep.RateType == 1) // сложный
-                            balance += balance * monthlyRate;
-                        else // простой
-                            balance += dep.InitialAmount * monthlyRate;
-                    }
-
-                    // Рост акций (среднемесячный)
-                    foreach (var st in stocks)
-                        balance += st.CurrentTotalValue * st.AvgMonthlyGrowthPercent / 100m;
-
-                    // Рост валют
-                    foreach (var cur in currencies)
-                        balance += cur.CurrentTotalValue * cur.AvgMonthlyGrowthPercent / 100m;
-
-                    // Рост металлов
-                    foreach (var met in metals)
-                        balance += met.CurrentTotalValue * met.AvgMonthlyGrowthPercent / 100m;
-
-                    // Кредиты (с проверкой погашения)
-                    for (int i = activeCredits.Count - 1; i >= 0; i--)
-                    {
-                        var (credit, monthsLeft) = activeCredits[i];
-                        if (monthsLeft > 0)
-                        {
-                            balance -= credit.MonthlyPayment;
-                            activeCredits[i] = (credit, monthsLeft - 1);
-                        }
-                    }
-
-                    // Инфляция не вычитается из номинала — только для реального
-                }
-
-                double inflationFactor = Math.Pow(1 + (double)_inflationRate / 100.0, month / 12.0);
-                decimal realValue = balance / (decimal)inflationFactor;
-
-                nominalSeries.Points.AddXY(currentDate, (double)balance);
-                realSeries.Points.AddXY(currentDate, (double)realValue);
-            }
-
-            // Вертикальная линия — сегодня
-            var todayLine = new System.Windows.Forms.DataVisualization.Charting.StripLine
-            {
-                IntervalOffset = DateTime.Now.ToOADate(),
-                StripWidth = 1,
-                BackColor = Color.FromArgb(52, 73, 94),
-                BorderColor = Color.FromArgb(52, 73, 94),
-                BorderWidth = 2,
-                Text = "Сегодня",
-                TextAlignment = StringAlignment.Near,
-                TextOrientation = System.Windows.Forms.DataVisualization.Charting.TextOrientation.Rotated270,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold)
-            };
-            chartArea.AxisX.StripLines.Add(todayLine);
-
             var legend = new System.Windows.Forms.DataVisualization.Charting.Legend
             {
                 Docking = System.Windows.Forms.DataVisualization.Charting.Docking.Bottom,
@@ -2744,10 +2764,137 @@ namespace FinancialAnalyzer.Forms
             };
             chart.Legends.Add(legend);
 
+            // Метод перестроения графика
+            Action rebuildChart = () =>
+            {
+                nominalSeries.Points.Clear();
+                realSeries.Points.Clear();
+                chartArea.AxisX.StripLines.Clear();
+
+                if (!int.TryParse(txtHorizon.Text, out int horizonMonths) || horizonMonths < 1 || horizonMonths > 240)
+                {
+                    horizonMonths = 24;
+                    txtHorizon.Text = "24";
+                }
+
+                DateTime startDate = DateTime.Now;
+                if (deposits.Count > 0) startDate = deposits.Min(d => d.OpenDate);
+                if (stocks.Count > 0) startDate = new[] { startDate, stocks.Min(s => s.PurchaseDate) }.Min();
+                if (currencies.Count > 0) startDate = new[] { startDate, currencies.Min(c => c.PurchaseDate) }.Min();
+                if (metals.Count > 0) startDate = new[] { startDate, metals.Min(m => m.PurchaseDate) }.Min();
+                if (reserves.Count > 0) startDate = new[] { startDate, reserves.Min(r => r.CreatedAt) }.Min();
+
+                DateTime endDate = DateTime.Now.AddMonths(horizonMonths);
+
+                var activeCredits = new List<(CreditModel credit, int monthsLeft)>();
+                foreach (var c in credits)
+                    activeCredits.Add((c, c.MonthsLeft));
+
+                decimal balance = currentBalance;
+                int totalMonths = (endDate.Year - startDate.Year) * 12 + endDate.Month - startDate.Month;
+
+                for (int month = 0; month <= totalMonths; month++)
+                {
+                    DateTime currentDate = startDate.AddMonths(month);
+
+                    if (month > 0)
+                    {
+                        // Доходы тоже растут с инфляцией (индексация)
+                        decimal indexedIncome = incomeMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, month);
+                        // Расходы растут с инфляцией
+                        decimal indexedExpense = expenseMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, month);
+                        balance += indexedIncome - indexedExpense;
+
+                        foreach (var dep in deposits)
+                        {
+                            decimal monthlyRate = dep.InterestRate / 100m / 12m;
+                            if (dep.RateType == 1)
+                                balance += balance * monthlyRate;
+                            else
+                                balance += dep.InitialAmount * monthlyRate;
+                        }
+
+                        foreach (var st in stocks)
+                            balance += st.CurrentTotalValue * st.AvgMonthlyGrowthPercent / 100m;
+
+                        foreach (var cur in currencies)
+                            balance += cur.CurrentTotalValue * cur.AvgMonthlyGrowthPercent / 100m;
+
+                        foreach (var met in metals)
+                            balance += met.CurrentTotalValue * met.AvgMonthlyGrowthPercent / 100m;
+
+                        for (int i = activeCredits.Count - 1; i >= 0; i--)
+                        {
+                            var (credit, monthsLeft) = activeCredits[i];
+                            if (monthsLeft > 0)
+                            {
+                                balance -= credit.MonthlyPayment;
+                                activeCredits[i] = (credit, monthsLeft - 1);
+                            }
+                        }
+                    }
+
+                    double inflationFactor = Math.Pow(1 + (double)_inflationRate / 100.0, month / 12.0);
+                    decimal realValue = balance / (decimal)inflationFactor;
+
+                    nominalSeries.Points.AddXY(currentDate, (double)balance);
+                    realSeries.Points.AddXY(currentDate, (double)realValue);
+                }
+
+                // Метки погашения кредитов
+                var activeCreditsForLabels = new List<(CreditModel credit, int monthsLeft)>();
+                foreach (var c in credits)
+                    activeCreditsForLabels.Add((c, c.MonthsLeft));
+
+                for (int i = 0; i < activeCreditsForLabels.Count; i++)
+                {
+                    var (credit, monthsLeft) = activeCreditsForLabels[i];
+                    if (monthsLeft > 0 && monthsLeft <= totalMonths)
+                    {
+                        DateTime payOffDate = DateTime.Now.AddMonths(monthsLeft);
+                        var payOffLine = new System.Windows.Forms.DataVisualization.Charting.StripLine
+                        {
+                            IntervalOffset = payOffDate.ToOADate(),
+                            StripWidth = 0.5,
+                            BackColor = Color.FromArgb(46, 204, 113),
+                            BorderColor = Color.FromArgb(46, 204, 113),
+                            BorderWidth = 1,
+                            BorderDashStyle = System.Windows.Forms.DataVisualization.Charting.ChartDashStyle.Dash,
+                            Text = $"  {credit.Name} погашен",
+                            TextAlignment = StringAlignment.Near,
+                            TextOrientation = System.Windows.Forms.DataVisualization.Charting.TextOrientation.Rotated270,
+                            Font = new Font("Segoe UI", 7, FontStyle.Regular)
+                        };
+                        chartArea.AxisX.StripLines.Add(payOffLine);
+                    }
+                }
+
+                // Линия «Сегодня»
+                var todayLine = new System.Windows.Forms.DataVisualization.Charting.StripLine
+                {
+                    IntervalOffset = DateTime.Now.ToOADate(),
+                    StripWidth = 1,
+                    BackColor = Color.FromArgb(52, 73, 94),
+                    BorderColor = Color.FromArgb(52, 73, 94),
+                    BorderWidth = 2,
+                    Text = "Сегодня",
+                    TextAlignment = StringAlignment.Near,
+                    TextOrientation = System.Windows.Forms.DataVisualization.Charting.TextOrientation.Rotated270,
+                    Font = new Font("Segoe UI", 8, FontStyle.Bold)
+                };
+                chartArea.AxisX.StripLines.Add(todayLine);
+            };
+
+            btnApplyHorizon.Click += (s, e) => rebuildChart();
+
+            // Первичное построение
+            rebuildChart();
+
             chartPanel.Controls.Add(chart);
 
             // Сборка
             _contentPanel.Controls.Add(chartPanel);
+            _contentPanel.Controls.Add(forecastHorizonPanel);
             _contentPanel.Controls.Add(summaryPanel);
             _contentPanel.Controls.Add(cardsPanel);
             _contentPanel.Controls.Add(forecastPanel);

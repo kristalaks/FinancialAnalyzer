@@ -77,7 +77,7 @@ namespace FinancialAnalyzer.Forms
             _txtCustomName = AddTextBox(left, y, width, "Название источника"); _txtCustomName.Visible = false; y += 30;
 
             // Сумма
-            AddLabel("Сумма за одну выплату (₽, до налогов):", left, y); y += 22;
+            AddLabel("Итоговая сумма за месяц (₽, до налогов):", left, y); y += 22;
             _txtAmount = AddTextBox(left, y, width, "80000"); y += 45;
 
             // Выплат в месяц
@@ -137,10 +137,11 @@ namespace FinancialAnalyzer.Forms
 
         private void UpdateCalc()
         {
-            if (decimal.TryParse(_txtAmount.Text, out decimal amt))
+            if (decimal.TryParse(_txtAmount.Text, out decimal total))
             {
                 int payments = (int)_nudPaymentsPerMonth.Value;
-                decimal gross = amt * payments;
+                decimal perPayment = total / payments;
+                decimal gross = total;
                 decimal net = _chkAfterTax.Checked ? gross : gross * 0.87m;
                 decimal tax = _chkAfterTax.Checked ? 0 : gross * 0.13m;
 
@@ -160,7 +161,7 @@ namespace FinancialAnalyzer.Forms
                 Id = _existing?.Id ?? 0,
                 Source = (IncomeModel.IncomeSourceEnum)_cmbSource.SelectedIndex,
                 CustomName = _cmbSource.SelectedIndex == 4 ? _txtCustomName.Text.Trim() : null,
-                AmountPerPayment = amt,
+                AmountPerPayment = amt / (int)_nudPaymentsPerMonth.Value,
                 PaymentsPerMonth = (int)_nudPaymentsPerMonth.Value,
                 IsAfterTax = _chkAfterTax.Checked,
                 StartDate = _dtpStartDate.Value,
