@@ -228,6 +228,7 @@ namespace FinancialAnalyzer.Forms
             // 
             this.ClientSize = new System.Drawing.Size(405, 567);
             this.Name = "RegisterForm";
+            this.Text = "Регистрация";
             this.ResumeLayout(false);
 
         }

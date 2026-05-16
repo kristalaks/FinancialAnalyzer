@@ -2799,9 +2799,7 @@ namespace FinancialAnalyzer.Forms
 
                     if (month > 0)
                     {
-                        // Доходы тоже растут с инфляцией (индексация)
                         decimal indexedIncome = incomeMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, month);
-                        // Расходы растут с инфляцией
                         decimal indexedExpense = expenseMonthly * (decimal)Math.Pow(1 + (double)_inflationRate / 100.0 / 12.0, month);
                         balance += indexedIncome - indexedExpense;
 
@@ -2989,6 +2987,7 @@ namespace FinancialAnalyzer.Forms
             this.MinimumSize = new System.Drawing.Size(1000, 600);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+            this.Text = "Главная";
             this.ResumeLayout(false);
 
         }

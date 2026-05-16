@@ -70,7 +70,10 @@ namespace FinancialAnalyzer.Services
                                 if (parts.Length >= 2)
                                 {
                                     string priceStr = parts[1].Trim();
-                                    if (decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal price))
+                                    if (decimal.TryParse(priceStr, 
+                                        System.Globalization.NumberStyles.Any,
+                                        System.Globalization.CultureInfo.InvariantCulture,
+                                        out decimal price))
                                     {
                                         return price;
                                     }

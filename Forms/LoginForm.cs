@@ -336,6 +336,7 @@ namespace FinancialAnalyzer.Forms
             this.ClientSize = new System.Drawing.Size(396, 433);
             this.Name = "LoginForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+            this.Text = "Вход";
             this.ResumeLayout(false);
 
         }
